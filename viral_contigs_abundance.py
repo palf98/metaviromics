@@ -203,15 +203,3 @@ if args.vs:
 
 if args.mode == 'viral':
 	compute_abundances(contig_is_viral, str(args.diamond)[0:-4], args.mode)
-
-
-if args.mode == "viral":
-	contigset = set()
-	n = 0
-	# contig stored if any aligned sequence to the contig is viral
-	for line in open(str(args.diamond)[0:-4] + '_families.tsv'):
-		line = line.strip('\n')
-		if line.split('\t')[0] not in contigset:
-			contigset.add(line.split('\t')[0])
-			n += 1
-print(str(n))
