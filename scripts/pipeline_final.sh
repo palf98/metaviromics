@@ -101,7 +101,7 @@ conda deactivate
 
 # Kaiju
 
-python /home/paualico/metavirome/scripts/kaiju_compute_abundances_generalized.py /home/paualico/metavirome/FINAL/ _kaiju_pair_tax.txt
+python /home/paualico/metavirome/scripts/kaiju_compute_abundances.py /home/paualico/metavirome/FINAL/ _kaiju_pair_tax.txt
 
 # Diamond
 
@@ -117,7 +117,7 @@ python /home/paualico/metavirome/scripts/add_sraID.py /home/paualico/metavirome/
 
 source activate R_env
 # merge compositions into a single matrix
-Rscript /home/paualico/metavirome/scripts/merging_tpm_tables_new.R /home/paualico/metavirome/FINAL/ /home/paualico/metavirome/FINAL/
+Rscript /home/paualico/metavirome/scripts/merging_tpm_tables.R /home/paualico/metavirome/FINAL/ /home/paualico/metavirome/FINAL/
 
 conda deactivate
 
