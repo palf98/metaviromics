@@ -13,7 +13,7 @@
 #### CARPETAS ####
 ####
 
-python /home/paualico/metavirome/scripts/script_estructura_carpetas.py /home/paualico/metavirome/FINAL_resto_filos.tsv /home/paualico/metavirome/FINAL/
+python /home/paualico/metavirome/scripts/script_structure.py /home/paualico/metavirome/FINAL_resto_filos.tsv /home/paualico/metavirome/FINAL/
 
 ####
 #### DESCARGA ####
@@ -108,7 +108,7 @@ python /home/paualico/metavirome/scripts/kaiju_compute_abundances_generalized.py
 # get tpm per viral family for each accession
 source activate taxonkit
 
-for DMND in /home/paualico/metavirome/FINAL/*/*/*diamond_f.tsv; do KLST="${DMND/_diamond_f.tsv/_kallisto}"/abundance.tsv; python3 /home/paualico/metavirome/scripts/viral_contigs_abundance_mayo.py --diamond "$DMND" --kallisto "$KLST" --taxonkit /home/paualico/.conda/envs/taxonkit/bin/taxonkit --dmp_dir /home/paualico/.conda/envs/diamond/db/nr/ --verbose; done
+for DMND in /home/paualico/metavirome/FINAL/*/*/*diamond_f.tsv; do KLST="${DMND/_diamond_f.tsv/_kallisto}"/abundance.tsv; python3 /home/paualico/metavirome/scripts/viral_contigs_abundance.py --diamond "$DMND" --kallisto "$KLST" --taxonkit /home/paualico/.conda/envs/taxonkit/bin/taxonkit --dmp_dir /home/paualico/.conda/envs/diamond/db/nr/ --verbose; done
 
 conda deactivate
 
