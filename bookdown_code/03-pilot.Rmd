@@ -1,0 +1,935 @@
+
+
+# Pilot test
+
+The election of a particular pipeline has an effect on the results obtained and has to be made according to the type of data and the study objectives. In order to compare the results and the scalability of different bioinformatics pipelines prior to the definitive analysis, a reduced subset of 100 accessions was randomly sampled from the original data frame. Since these accessions also contained BioSamples and BioProjects, the number of run accessions was higher, in fact, 138. All programs were tested and run in the HPC cluster 'Garnatxa' of I$^2$SysBio (UV-CSIC).
+
+## Bioinformatic methods {#pilot-bioinf}
+
+### Download and pre-processing
+
+Three different programs were tested for the download of sequence files and compared in terms of minutes elapsed per GB of compressed sequence file (\texttt{.fastq.gz} format) at \texttt{gzip}'s default compression level: *(i)* fastq-dump, *(ii)* fasterq-dump and *(iii)* parallel-fastq-dump. 
+
+Fastq-dump is the standard, basic program to download fastq sequence files from SRA database included in the [SRA Toolkit](https://github.com/ncbi/sra-tools). Fastq-dump of SRA Toolkit version 2.11.2 was used with \texttt{--split-files} and \texttt{--gzip} arguments to divide forward and reverse reads in paired-end data and to compress the fastq files after downloading, respectively. The result was a rate of 9 minutes elapsed per GB of fastq compressed file. 
+Fasterq-dump is an alternative program also built in SRA Toolkit which allows parallelization into multiple threads to speed up the download step. As it lacks an option to compress downloaded fastq files, [pigz](https://leimao.github.io/blog/Parallel-Gzip-Pigz/) version 2.3.4, a parallel implementation of \texttt{gzip}, was used down-stream to compress the sequence files downloaded with fasterq-dump.
+Finally, the third program tested was [parallel-fastq-dump](https://github.com/rvalieris/parallel-fastq-dump). Parallel-fastq-dump allows the division of files in blocks that are processed independently by different fastq-dump jobs to concatenate the results in the end. Two methods with parallel-fastq-dump version 0.6.7 were tested, one with the native compression \texttt{--gzip} option included in fastq-dump and the other with pigz compression over the downloaded fastq files.
+
+The method involving fasterq-dump and pigz was reported to be the fastest at roughly one minute elapsed by GB of compressed sequence file. This is a 47\% faster than parallel-fastq-dump with \texttt{--gzip} option, the second fastest method (Table \@ref(tab:fqd-speed)). Compressed fastq files were chosen over plain fastq files as the programs in downstream analyses allow processing of compressed fastq files.
+
+Once the download was finished for all selected accessions, Trimmomatic [@Bolger2014] version 0.39 was used over the raw reads to filter technical sequences such as adapters introduced by NGS platforms and low quality reads with base call accuracy equal or greater than 99.95\% (Phred score 33). Trimmomatic was run with 25 threads and did not require any further optimization, as it works fast enough to not represent a limiting step in the pipeline. An accession of approximate average size (7 Gb) was processed by Trimmomatic in approximately 14 min.
+
+### Taxonomic classification at read level with Kaiju {#kaiju}
+
+Once the sequence files are trimmed and filtered, assembly-free taxonomic classification methods can be applied over the reads. [Kaiju](https://github.com/bioinformatics-centre/kaiju) [@Menzel2016] is a classification program developed for metagenomics and metatranscriptomics datasets that relies on the Burrows-Wheeler transform of protein sequences to speed up the comparison of reads to a reference database. Alignment of amino acid sequences allows to identify more ancient and divergent relationships and is therefore more sensitive than nucleotide-level comparisons in this context.
+
+In short, sequencing reads are translated into the six possible reading frames and split into fragments by the stop codons found. For each read, the taxonomic lineage of the most similar database match to any of its fragments is retrieved and linked to that read. Kaiju uses two methods to estimate the similarity of matches: *(i)* match length for exact matches, i.e. maximum exact match (MEM) mode, and *(ii)* alignment score for inexact matches based on the BLOSUM62 substitution matrix (Greedy mode). 
+
+In this study, Kaiju version 1.8.2 was run in Greedy mode with a default maximum of three mismatches. Greedy mode was chosen over MEM mode for being more sensitive and flexible in relation to the protein sequences available in the reference database. The reference database used was the protein version of the Reference Viral DataBase (RVDB) [@Bigot2020] version 22.0, chosen for being highly curated and suitable for detection of viruses in high-throughput sequencing datasets. Also, its smaller size compared to NCBI RefSeq and nr databases makes the Kaiju analysis require less memory and runtime while focusing on virus detection. To avoid an excess of false positives, a BLOSUM62 score threshold of 65 and an E-value cutoff of $0.01$ were determined. E-value takes into account database size to estimate the expected number of matches with a particular score occurring by chance. The runtime of the described method for an average run accession was approximately 8 minutes using 25 threads.
+
+Each read classified as viral was assigned to a viral family and the read counts related to each viral family $j = 1, ..., D$ for each run accession $i = 1, ..., n$ were added, thus constructing an absolute abundance vector $x_i$ for each individual, with as many components as viral families found. For each run accession, the sum of this vector equals the total number of reads assigned as viral. These vectors can be combined into an abundance matrix $X (n \times D) = \begin{bmatrix} x_1 \\ \vdots \\ x_n \end{bmatrix}$ and attached to the other variables in the original data frame. To do this, it is necessary to homogenize the dimensionality of the vectors by adding zero values to viral families not found within each run accession.
+
+
+### Assembly and transcript abundance estimation
+
+Two main strategies exist to reconstruct transcriptomes from RNA-Seq data by assembling reads into contigs: *(i)* *de novo* assembly and *(ii)* assembly by mapping to reference genomes. In this study, *de novo* assembly was chosen over reference mapping because it removes bias towards viruses of known genomes. Furthermore, mapping to host genomes to filter host sequences and reduce downstream workload is not possible, as the study includes many non-model invertebrate species without reference genomes available. However, *de novo* assemblers are very computationally demanding and especially memory-intensive. Two programs for *de novo* assembly of reads were used and compared: *(i)* [Trinity](https://github.com/trinityrnaseq/trinityrnaseq) [@Grabherr2011] and *(ii)* [rnaviralSPAdes](https://github.com/ablab/spades) [@Meleshko2021]. Both methods operate similarly, partitioning the sequences into *k-mers* to generate De Bruijn graphs that are analyzed to identify splicing variants.
+
+Trinity is one of the most sensitive *de novo* assemblers for RNA-Seq data as it aims is to extract as much information as possible. While it assembles a lower number of unique transcripts than other short read assemblers, Trinity does not require as much memory [@Sze2017]. Trinity version 2.13.2 was run in Singularity with default parameters, i.e. a *k-mer* length of 25 bases, over the trimmed sequencing read files. With 25 threads and a maximum memory usage of 100 GB, Trinity took three hours to process an average-sized run accession.
+
+Alternatively, directed assembly of RNA virus contigs was conducted with rnaviralSPAdes version 3.15.4. This software assembles RNA viruses at species level, collapsing sequences of quasispecies that will certainly coexist in the samples given the high rate of variation of RNA virus genomes. In terms of runtime, assembling with rnaviralSPAdes has been superior to Trinity's, since only 14 minutes were needed for an accession of 7 Gb running with 16 threads. However, this program was discarded for its results in the downstream analyses, since most of contigs assembled by rnaviralSPAdes were not classified as viral, resulting in a low proportion of viral contigs from an overall much lower number of assembled contigs (roughly assembling only `r round((((1569/1145652) + (825/96998) + (1395/1335782) + (250/1133292) + (650/1074797) + (551/3149195) + (2437/2177511) + (2794/2190581) + (2440/2167100) + (2395/2253225) + (863/1163059)) / 11)*100, 2)`\% of contigs with rnaviralSPAdes compared to those obtained with Trinity).
+
+Once the assembly was finished, the abundance of the RNA molecules in the samples represented by each contig was quantified. For convenience, we will refer to those RNA molecules as transcripts. For that purpose, two programs that are included within Trinity 2.13.2 toolkit were tested and compared: *(i)* [RSEM](https://github.com/deweylab/RSEM) [@Li2011] and *(ii)* [Kallisto](https://github.com/pachterlab/kallisto) [@Bray2016]. RSEM is an alignment-based method that involves mapping the reads to the assembled contigs in order to obtain read count measures to estimate transcript abundance. Meanwhile, Kallisto uses a faster, alignment-free strategy that involves the decomposition of read and contig sequences into *k-mers* to indirectly map the reads to the contigs with a *k-mer* hash table. This approximation has shown to be nearly as accurate as alignment-based methods with real data [@Sarantopoulou2021]. In this study, Kallisto was chosen over RSEM not only for being nearly 39 times faster, but also because RSEM was unstable with our data, failing to give a complete output for $\sim 11 \%$ of sampled accessions. Kallisto gives an estimation of read counts per transcript and normalized measures for transcript abundance such as TPM (Transcripts Per Million), which accounts for transcript length and sequencing depth to give a corrected measure of transcript relative abundance within the whole transcript population of the sample. This metric takes the sum of reads mapped to contigs as a whole, leaving the unmapped reads out of the equation.
+
+The E90N50 statistic for contigs was computed to assess the quality of the Trinity assembled transcriptomes. This is a modification of the conventional contig N50 traditionally used in genomics, which determines the contig size over which half of the assembled bases are covered in the assembly. In transcriptomics, the addition of the Ex metric is recommended to filter out the least expressed genes and keep the genes that account for the $x\%$ of the normalized expression. Lowly expressed genes can heavily distort the conventional N50 statistic, since their contigs will tend to be shorter due to their lower coverage. E90N50 was computed with the 'contig_ExN50_statistic.pl' utility provided in Trinity toolkit using the transcript abundance data estimated with Kallisto.
+
+### Taxonomic classification at contig level
+
+Five different methods were compared in the context of taxonomic classification of contigs in terms of runtime and analysis results in order to choose the best suited method for final analysis of data: *(i)* [DIAMOND](https://github.com/bbuchfink/diamond) [@Buchfink2021], *(ii)* DIAMOND over [VirFinder](https://github.com/jessieren/VirFinder)'s [@Ren2017] subset of putative viral contigs, *(iii)* DIAMOND over [VirSorter2](https://github.com/jiarong/VirSorter2)'s [@Guo2021] subset of putative viral contigs, *(iv)* [CAT](https://github.com/dutilh/CAT) [@VonMeijenfeldt2019], and *(v)* [Prodigal](https://github.com/hyattpd/Prodigal) [@Hyatt2010], [HMMER](http://hmmer.org/) and CAT.
+
+First by order of mention, DIAMOND implements a protein alignment method optimized for massive query datasets and reference databases. The scope of DIAMOND is to perform sequence similarity searches that are similar in sensitivity to BLAST, but at a substantially faster rate. DIAMOND v2.0.13 was used in blastx mode to translate the nucleotide contigs into proteins and to perform alignments against a reference database, in this case, the whole NCBI nr database (downloaded on 15 December 2021). Using the second most sensitive mode of DIAMOND (\texttt{--very-sensitive}), the search and alignment process took roughly $32$ hours for an average-sized accession, with this step causing a major time increase in the pipeline. DIAMOND's output contains the NCBI taxonomy identifier (TaxID) and the E-value of each hit for each contig. [Taxonkit](https://bioinf.shenwei.me/taxonkit/) [@Shen2021] was used to obtain the family of each hit from its TaxID's. A contig was considered viral when it had a hit taxonomically annotated as viral with an E-value lower than $1e-05$. Then, the abundance estimation (TPM) for contigs belonging to each viral family were added and the viral families abundance matrix was constructed.
+
+VirFinder and VirSorter2 are two methods that use different strategies to predict *viralness* of contigs and which can be used prior to DIAMOND to reduce its workload at query level. Over the resulting subsets of putative viral contigs, the whole DIAMOND process described above is performed in order to obtain the taxonomic information and construct the abundance matrices. In this context of *viralness* prediction, the balance between false positives and false negatives can be seen as a trade-off between runtime and sensitivity. Thus, a subset of contigs with an excess of false positives, i.e. host sequences, will make the DIAMOND process take longer. Meanwhile, a subset leaving out a high number of true viral sequences will artificially reduce the viral diversity while speeding up the DIAMOND process.
+
+VirFinder is an R-built method that uses *k-mer* frequency-based Lasso logistic regression models trained on host and virus sequences in order to classify contigs. Different models are fitted for sequences of different lengths, with a reported optimum at lengths of $1$ to $3$kb [@Ren2017]. VirFinder is a binary classifier where the null hypothesis, i.e. that of a contig not being viral, is tested for each contig. Under this multiple comparisons context, $p$-values were corrected by the Benjamini-Hochberg procedure in order to control the false discovery rate (FDR) with $\alpha = 0.05$. After parallelization, VirFinder version 1.1 runs at a rate of $4$ min/Gb using the 'VF.modEPV_k8' model, which is trained with prokaryotic and eukaryotic host and virus sequences (script available in \href{https://github.com/palf98/metaviromics}{(https://github.com/palf98/metaviromics)}).
+
+VirSorter2 applies a machine learning-based approach to predict the *viralness* of contigs using different variables including structural, functional and taxonomic features, such as GC content, gene density, gene overlapping frequency or strand switching frequency. Since these variables are highly heterogeneous among major groups of viruses, different models are applied to detect RNA viruses, ssDNA viruses, dsDNA viruses and giant DNA viruses. However, in our case this is only useful not to introduce a bias in the binary virus-host classification towards a particular group of viruses, as a more comprehensive taxonomic classification is then performed by DIAMOND. Each virus group classifier provides each contig with a score in the range of $0$ to $1$, where $1$ means a higher virus call confidence. In this case, a moderate score cutoff of $0.5$ was used to avoid an excess of false negatives before classification with DIAMOND, which will presumably further reduce the number of viral contigs. VirSorter version 2.2.3 was run in parallel with $20$ threads, classifiers for RNA, ssDNA and dsDNA viruses and the \texttt{--keep-original-seq} parameter, yielding a processing rate of $58$ min/Gb.
+
+A fourth method considered CAT as an alternative for taxonomic classification of contigs. Although CAT is originally thought for metagenomic data, the fact that it is more robust compared to DIAMOND and Kaiju in detection of novel viruses made CAT an interesting candidate tool. CAT is a pipeline that involves: *(i)* a prediction of ORFs^[An Open Reading Frame (ORF) is the sequence enclosed between a start codon and a stop codon in the exome or the transcriptome. These two features define the peptide that can be potentially expressed from this ORF after translation of mRNA. The finding of an ORF does not exclude the presence of another valid reading frame in the same region.] and their translation into proteins with Prodigal, *(ii)* similarity searches of the translated protein sequences with DIAMOND in blastp mode against the nr database, and *(iii)* taxonomic classification based on CAT's algorithm. The ORF prediction and translation approach highly reduces the workload for the subsequent DIAMOND step compared to the above described DIAMOND blastx strategy, where contigs are completely translated into proteins in all six reading frames. Once DIAMOND has ended searching for hits, CAT's algorithm gives a last common ancestor consensus between the taxonomic affiliations of the top-scoring hits (E-value $< 0.001$) to the protein sequence(s) of a contig. Thus, CAT avoids being overly-specific and can provide a higher taxonomic rank when no clear classification can be done at species level, making it more robust and sensitive to sequences without close relatives in the database. With CAT version 5.2.3, the whole CAT pipeline was run in 1 hour and 18 minutes parallelized with 20 threads for the 7 Gb accession used as benchmark.
+
+The last method uses another strategy to purge non-viral contigs prior to more accurate contig classification by performing a search against profile hidden Markov models (HMMs) of RdRp. First of all, profile HMMs are probabilistic models that gather position-specific information about a set of aligned sequences [@Eddy1998]. This means that the model adapts to the substitutions, insertions and deletions that are found in the multiple sequence alignment and each variation is given a score that depends on the occurrence of those changes in each particular position. In contrast to previous methods, virus detection here is directed only towards RNA viruses, since the high degree of conservation in the aminoacid sequence of RdRp makes the application of profile HMMs advantageous. RdRp profile HMMs were made using \texttt{hmmbuild} function of HMMER version 3.3.2 over nine reference RdRp protein alignments recovered from [Pfam](https://pfam.xfam.org/) (PF00680, PF00972, PF00978, PF00998, PF02123, PF04197, PF05919, PF20483, PF20488). In this step, the underlying probabilistic model that maximizes likelihood to generate the observed sequences in the seed alignment is obtained. 
+
+Prodigal version 2.6.3 was used for the purpose of prediction of ORFs in the assembled contigs and their subsequent translation into aminoacid sequences. Once the sequences of the putatively existing proteins are translated, their homology to the different RdRp profile HMMs was examined using \texttt{hmmsearch} function of HMMER. What is being evaluated here is, namely, the compatibility between the hidden model that generated each translated protein sequence and the profile HMMs one by one. Similarly to other sequence similarity search algorithms, each query sequence is given a score and an E-value of which a threshold of $1e-05$ was used. As these profiles are built with viruses of different families, this is not sufficient classification for our goal, since we are interested in a classification of contigs to specific viral families. Therefore, CAT was used over the significant hits in \texttt{hmmsearch}'s output following the above described method. In terms of computational time requirements, this fifth method is by far the fastest one: for our benchmarking accession, Prodigal was done in approximately 8 minutes and \texttt{hmmsearch} in a few seconds. CAT was very fast because of the few sequences with significant homology to RdRp in \texttt{hmmsearch} analysis. However, less diversity is expected in the viromes obtained with this method due to the loss of DNA viruses by only focusing on RNA viruses via RdRp homology.
+
+In the end, the taxonomic assignments of assembled contigs for all five tested pipelines were processed to match the abundance matrix structure of samples by viral families introduced in \@ref(kaiju). Nonetheless, in the context of contigs, transcript abundances are estimated with TPM units, which are a concentration measure relative to the whole surveyed transcript population. Thus, the sum of each row divided by one million equals the estimated proportion of viral RNA. This is equivalent to the quotient between the assigned viral reads and the total number of reads in the case of reads.
+
+## Statistical methods {#pilot-stat}
+
+In the previous section, the data structure of the response variable has been shortly introduced in the context of the different pipelines' output. Next, the appropriateness of a compositional approach to the analysis of the obtained viral families abundance tables is discussed. Once the type of data that is being dealt with is defined, some applicable statistical analyses will be presented.
+
+### Treatment of virome data as compositional data
+
+First, it is convenient to recall the aim of this study, which is to identify differences in virome community composition between different groups. More specifically, this purpose is fulfilled by answering questions such as: is viral family A more abundant in sample 1 than in sample 2? To answer this question, it is fundamental to understand that the meaning of abundance in this context is namely the dominance of transcripts of family A with respect to the whole viral transcript population. The values in the estimated abundance tables do not answer this question directly. In the case of read count tables, the values depend on the total number of reads of each experiment, which is variable among the samples. Therefore, the absolute difference for read counts of family A between samples 1 and 2 is not very suitable for virome analysis. This is also the case for TPM tables, where the observed values for every family depend on the sum of viral TPM, which differs between samples, too. Nevertheless, both matrices carry relative information that can be useful to answer such questions. The read counts or transcript concentrations assigned to each viral family represent its contribution to the total viral abundance or the whole transcriptome expression if its non-viral part is also considered. In short, the primary interest lies in the distribution of the identified viral RNA across the different viral families.
+
+The purpose of compositional data is to characterize the parts of some whole [@Pawlowsky-Glahn2015a]. A particular dataset composed of multivariate observations of proportions, concentrations or absolute frequencies can be considered compositional data if the goal is to quantify the relative contribution of each or some of its parts to the total. The source of such relative information is contained implicitly in the data, namely in the ratios between the parts, whose observed values are strictly positive by definition. However, when the absolute amounts and differences constitute the matter of interest, a standard multivariate approach is more appropriate. For these ambivalent multivariate datasets, the distinction between treatments is dependent on the analyst's goals. It is worthy to note that when both the relative information and the total amount are relevant, the latter can be kept and analyzed as a variable external to the compositional structure [@Pawlowsky-Glahn2015b].
+
+Formally, this treatment distinction draws on the assumption of different underlying sample spaces for the data. In the case of standard multivariate analysis, operations take place in the real Euclidean space. Meanwhile, the sample space for compositional data is the simplex, which is subject to the properties of the Aitchison geometry, i.e. the algebraic-geometric structure of the simplicial vector space [@Aitchison1982]. The application of common statistical analyses based on Euclidean geometry in the analysis of proportions can lead to incoherent and inconsistent results. This was noted by Karl Pearson in 1897, as he observed that the ratios between uncorrelated random variables showed in fact a *spurious* correlation [@Pearson1897].
+
+A composition is a vector of strictly positive values with as many elements as parts. Considering a set of $D$ parts or components, the composition $x = (x_1, x_2, \ldots, x_D)^\prime$ exists in the positive real D-dimensional space $\mathbb{R}^D_+$. Compositional data are characterized by the principle of *scale invariance*, which states that the multiplication of a composition by an arbitrary positive scalar does not affect the ratios between components. Therefore, the relative information of compositions is preserved after rescaling to proportions or percentages or after changing units. The *closure operator* $C$ is used to rescale compositions to have a sum equal to a desired positive constant $\kappa$ \@ref(eq:closure). The closure of the previously proposed $x$ composition to $\kappa$ stands as 
+
+\begin{equation} 
+  C_{\kappa}(x) = \left( \frac{\kappa \cdot x_1}{\sum^{D}_{i=1}x_i}, \ldots, \frac{\kappa \cdot x_D}{\sum^{D}_{i=1}x_i} \right).
+  (\#eq:closure)
+\end{equation} 
+
+The property of scale invariance results in the more recent definition of compositions as equivalence classes [@Barcelo-Vidal2016], where two compositions $x$ and $y$ are compositionally equivalent if $C_{\kappa}(x) = C_{\kappa}(y)$. Or alternatively if $x$ and $y$ are proportional, i.e. if there exists a positive scalar $c$, such that $x = c \cdot y$. In this case, $x$ and $y$ are just two out of all possible representatives of their equivalence class. A practical approach in the analysis of compositional data is to obtain vectors of proportions by normalizing the compositions to have a constant sum of one. Compositional vectors of D dimensions that sum up to one are easy to represent in the $(D-1)$-standard simplex $S^D$, a subset of $\mathbb{R}^D_+$ whose vertices are formed by all D possible unit vectors of D dimensions:
+
+
+\begin{equation} 
+  S^D = \left\{ x = (x_1, \ldots, x_D)^\prime \in \mathbb{R}^D \mid x_i > 0, \sum^{D}_{i=1} x_i = 1 \right\}.
+  (\#eq:simplex)
+\end{equation}
+
+However, the principle of scale invariance demonstrates that the constant sum constraint $\kappa$ is irrelevant in terms of relative information and the sample space of compositions can be generalized for each of its representatives [@Filzmoser2018a]:
+
+\begin{equation} 
+  \tilde{S^D} = \bigg\{ x = (x_1, \ldots, x_D)^\prime \in \mathbb{R}^D_+ \mid x_i > 0, \forall \kappa > 0 \, \exists ! c > 0: x = cC_\kappa(x) \bigg\}.
+  (\#eq:samplespace)
+\end{equation}
+
+Thus, the traditional sum constraint property of compositional data [@Chayes1960] is nowadays disregarded as just a way to obtain a specific representative of a composition's equivalence class [@Egozcue2019].
+
+Another main principle of compositional data is that of *subcompositional coherence*, which states that the information carried by a composition and any of its subcompositions, i.e. subvectors, should not contradict. More specifically, this is reflected by the following two properties: *(i)* the distance between two compositions $x$ and $y$ is always equal or greater than the distance between two of their subcompositions $x_s$ and $y_s$ (*subcompositional dominance*) and *(ii)* the ratios between two parts do not depend on the arbitrary inclusion/exclusion of further parts in the composition or subcomposition (*preservation of ratios*). Although it is also to be expected in other types of multivariate data, *permutation invariance* is the third principle of compositional data. It enunciates that the the order in which the parts of a composition are expressed should not have an effect on the results of the analysis [@Pawlowsky-Glahn2015c; @Filzmoser2018b].
+
+Although ratios are the essential source of information of compositional data, the main approaches to analyze this type of data rely on a specific family of transformations thereof. For instance, consider all pairwise ratios in a composition to a reference part $\frac{x_i}{x_D}, i = 1, \ldots, D - 1$. The distribution of these ratios is asymmetric in $(0, +\infty)$ with a balance between the weight of both the parts in the numerator and the denominator in 1. The logarithm transformation of the ratios (*logratios*) moves the range to the real line $(-\infty, +\infty)$ and centers the balance in $0$. Thus, logratios enhance the interpretation of relative information and its mathematical handling.
+
+The logratio methodology was first introduced by John Aitchison [@Aitchison1982] with what is known today as the *move-from-the-simplex* approach. The idea was to find a one-to-one transformation which made it possible to leave behind the simplicial sample space and study compositional data in an unrestricted real space, where common multivariate statistical methods can be applied. Here, logratios can be assumed to follow a Normal distribution, avoiding the geometrical peculiarities of the simplex. Later, the Aitchison geometry of the simplex was described with new basic operators for vector shifting and multiplication by a scalar. This led to redefinitions of norm, inner product and distance for the simplex essentially based on the use of logratios to obtain a Euclidean linear vector space. Once the simplicial sample space was defined as a proper metric vector space, the *staying-in-the-simplex* methodology was born. In this case, compositions are represented by orthonormal logratio coordinates with respect to a generating system, i.e. the simplex. While both strategies effectively avoid the development of adapted statistical methods to analyze raw compositions directly in the Aitchison geometry and their results are equivalent in some cases, there is a conceptual and rather subtle difference: in the first approach we assume that a log-normal random vector exists in $\mathbb{R}$ derived from the random composition, while in the second one, the random composition exists in $\mathbb{R_+}$ and its logratio coordinates are just a representation thereof [@Mateu-Figueras2011].
+
+The use of (log)ratios makes the presence of zero values in the compositions especially problematic in the analysis of compositional data. Although zero values are excluded from the formal definition of $\tilde{S^D}$, there are different reasons why zero values can occur in real data. When a continuous variable such as a concentration is being measured, *rounded zeros* can appear in the process of data generation when a recorded value is lower than a certain significance threshold or detection limit. In the case of count data, *sampling zeros* can occur when there is an insufficient sampling depth: although the element is present in the population, it is not sampled and hence, a zero value is recorded. Both presented types of zeros constitute cases similar to not missing at random (NMAR) values, i.e. the element was present but not detected due to its low abundance. Here, imputation of small values is the way to go [@Martin-Fernandez2011]. *Structural zeros*, also called true or essential zeros, are the result of the absolute absence of a particular component in a population. Therefore, the recorded zero value is not the consequence of a limited sample size or the measuring instruments used and can be understood as a true negative. In this case, there is an essential difference between observations with and without zeros that separates them in different populations [@Pawlowsky-Glahn2015c]. Thus, it seems that the replacement of such zeros, that are informative by themselves, by small values is not adequate. 
+
+<!-- (, although one could argue that with an unlimited number of tests, observations would eventually include non-zero records for all components in the form of false positives.) -->
+
+Fundamentally, viral families abundance tables are not different from other taxa count or percentage matrices used in ecology. The application of compositional data analysis to high-dimensional ecological community compositions is relatively established in the field of microbiome analysis [@Xia2018; @Tsilimigras2016]. However, in virome composition analyses, compositional approaches with the use of logratios for exploratory analyses have just recently been introduced [@Zuo2020; @Yan2021]. Just as microbiome data, virome data is generated through a process of sequencing and classifying the obtained reads into categories of interest, e.g. within a taxonomic rank of choice. As to why microbiome and virome data can be treated as compositional, it can be argued that the total sum of reads is not of interest *per se*, since it is an artifact of the experimental procedure, i.e. the total number of reads or library size. Accordingly, the absolute differences between components do not pose a valuable source of information to describe the contribution of each of the parts to the whole. Also, the observed values in microbiome or virome compositions are always non-negative regardless if they are discrete or continuous.
+
+```{r echo=F, results=F}
+VMR_19_250422_MSL37 <- suppressWarnings(readxl::read_excel("data/VMR_19-250422_MSL37.xlsx"))
+```
+
+
+However, omics-generated compositional data have a series of particular characteristics that can hinder the application of standard statistical approaches. Typically, these studies usually include a small number of observations $n$ due to their high generation cost and consider the classification of their reads into a larger number of categories $p$, thus leading to an underdetermined system. In the context of taxonomic classification, the number of possible categories varies drastically depending on the taxonomic rank of choice. For instance, the International Congress for Taxonomy of Viruses (ICTV) recognizes to date ([Virus Metadata Repository number 19, April 25, 2022; MSL37](https://talk.ictvonline.org/taxonomy/vmr/m/vmr-file-repository/13426)) `r length(unique(VMR_19_250422_MSL37$Species))` viral species arranged in `r length(unique(VMR_19_250422_MSL37$Genus))` genera, `r length(unique(VMR_19_250422_MSL37$Family))` families, `r length(unique(VMR_19_250422_MSL37$Order))` orders and so on moving upwards in the taxonomic hierarchy. The number of possible categories also has an effect on another acknowledged feature of virome data, which is a high frequency of zeros in the count matrices (sparsity). The use of OTUs and low taxonomic ranks, which is common in these fields, tends to aggravate both the large $p$, small $n$ and the sparsity problems [@Xia2017]. In the present case, the family rank was considered the taxonomic classification criterion for being a balanced source of information, neither too general nor too specific. Besides, the underdetermination problem can eventually be solved with an extensive enough analysis, as the number of analyzed observations surpasses that of observed categories. Also the sparsity problem is alleviated by this decision, although a dominant presence of zeros is still to be expected. Moreover, methods for variable selection and/or dimensionality reduction are common in the context of microbiome and virome data analysis.
+
+
+Virome taxa tables have notably diverse sources of zero values, which are forced to occur when compositional vectors with different parts are arranged into a matrix. However, it can be especially challenging to distinguish structural zeros from sampling and rounded zeros due to the complex experimental and bioinformatic process used to generate virome data. Structural zeros occur when the sample has an absolute lack of transcripts belonging to a particular viral family. Sampling zeros can be associated with an insufficient library size, low quality reads that are discarded by the trimming step and poor coverage of the family in the reference database used for classification of reads or contigs. To a lesser extent, rounded zeros can appear in the processing of data when converting the count data to relative abundances or other continuous metrics. 
+
+As a final remark regarding the features of virome datasets, while observations can be expected to be independent with a proper sampling procedure, the abundance of the different families will not be independent both from a compositional and an ecological point of view. There is a complex correlation structure where the former has an influence in the sense of sum of the parts to a whole (e.g. consider a composition $x$, so that $P( x_{(i=2,\ldots,D)} > 0.8 |\sum_i^Dx_i = 1, x_1 = 0.2) = 0$)) and the latter introduces relationships between virus groups due to phylogenetic and ecological resemblances (e.g. in a sample where a family of bacteriophages is found, it is likely to find further families of viruses infecting bacteria).
+
+
+### Ecological diversity metrics
+
+The observed abundance values for viral families arranged in each compositional vector can also be used to estimate different diversity measures to characterize the virome of a particular biological sample in a non-family-specific manner. First, the simplest considered diversity metric was $\alpha$-diversity at family level $F$. It summarizes the number of different viral families that are found in an observation. This measure of viral families richness can be defined for each observation in the $X (n \times D)$ abundance matrix as 
+
+\begin{equation} 
+  F_i = \sum^D_{j=1} f(X_{ij}) \text{, where } f(X_{ij}) = \begin{cases} 1 \text{ if } X_{ij} > 0 \\ 0 \text{ otherwise} \end{cases}\text{,}
+  (\#eq:richness)
+\end{equation}
+
+\begin{equation*} 
+ i = 1,2, \ldots, n \text{ and } j=1,2,\ldots,D\text{.}
+\end{equation*}
+
+In second place, the Shannon diversity index $H^\prime$ was estimated. Unlike richness estimate $F$, this index takes into account the proportions in which each of the viral families are found. Hence, a community with three families and a vector of relative abundances $x_A = (\frac{1}{20}, \frac{1}{20}, \frac{9}{10})$ is thought to have a lower entropy than a community with three families with balanced proportions $x_B = (\frac{1}{3}, \frac{1}{3}, \frac{1}{3})$, where the prediction of a next draw from the population is more uncertain. A high Shannon diversity index indicates that the community harbors a larger diversity. $H^\prime$ is maximized with increased values of families richness $F$ and the more balanced the abundances of the families are [@Ludwig1988]. Zero values are ignored for its definition and the total number of parts is reduced to the subset of parts effectively observed for each observation $F_i$. Abundances are converted to proportions in order to normalize the differences in the sample sizes of different observations. So,
+
+\begin{equation} 
+  H^\prime_i =  
+  -\sum^{F_i}_{j=1}\left(\frac{x_{ij}}{\sum^{F_i}_{j=1}} \cdot log(\frac{x_{ij}}{\sum^{F_i}_{j=1}}) \right) = 
+  -\sum^{F_i}_{j=1}\left(p_j \cdot log(p_j) \right)\text{,}\\
+  (\#eq:Shannon)
+\end{equation}
+
+where $F_i \in \{1,2,\ldots,D\} \text{, } i = 1,2,\ldots,n \text{ and } j = 1,2,\ldots,F_i\text{.}$ Note that this operation is not applied to a matrix, but to a collection of vectors of possibly different length.
+
+The balance between viral family proportions for an observation, i.e. families evenness, can be estimated from the ratio between the obtained $H^\prime_i$ and its maximum possible Shannon diversity index value $H^\prime_{i \text{ } max}$, which occurs when the abundances of all families in the community are equally distributed [@Ludwig1988]. $H^\prime_{max}$ is solely dependent on the number of families $F_i$, as can be seen in \@ref(eq:Shannon). Values near to 1 are indicative of a more even distribution of the community components. For every observation, the definition of families evenness index $E$ from $H^\prime$ estimate stands as
+
+\begin{equation} 
+  E_i = \frac{H^\prime_i}{H^\prime_{i\text{ }max}} = \frac{H^\prime_i}{log(F_i)} \text{, } i = 1,2, \ldots, n.
+  (\#eq:evenness)
+\end{equation}
+
+It is important to note that the presented diversity measures do not take into account the taxonomic relationship between families and therefore do not provide an estimate for distinctness. For instance, the diversity estimated for a community formed by two viral families will be the same regardless if both families are contained within the same order or if they diverged at higher taxonomic ranks.
+
+### PERMANOVA
+
+Permutational multivariate analysis of variance (PERMANOVA) was performed in order to test if the phylum and habitat factors have an effect on the samples' virome compositions given a dissimilarity measure of choice. In contrast to classical multivariate ANOVA (MANOVA), PERMANOVA is a non-parametric alternative that does not assume any distribution for the data and is relatively robust to heterogeneity of within-group variances and unbalanced designs. Furthermore, PERMANOVA can be applied to high-dimensional data with zero-inflated, overdispersed and underdetermined behavior. For its broad applicability spectrum, PERMANOVA is widely used in ecology to detect alterations in community structure in response to different conditions [@Anderson2017]. 
+
+In microbiome and virome community analyses, Bray-Curtis distance is the standard dissimilarity measure used in the context of PERMANOVA, as can be seen in recent examples [@Lu2021; @Hegarty2022; @Kaelin2022]. Bray-Curtis distance $BC$ is a standardized version of the Manhattan distance that quantifies the pairwise compositional dissimilarity between two samples based on the discrete or continuous abundance values of their community components. An interesting feature of $BC$ is that parts absent in both samples are ignored and rare parts have little effect compared to more dominant components. So,
+
+\begin{equation} 
+  BC_{ij} = \frac{\sum^D_{k = 1} \left|X_{ik} - X_{jk}\right|} {\sum^D_{k=1}\left(X_{ik}+X_{jk}\right)} \text{ ,}\\
+  (\#eq:BrayCurtis)
+\end{equation}
+
+where $D$ is the total number of families found for all samples, $X$ is the raw $n \times D$ abundance matrix and $i,j = 1, ..., n$ with $n$ being the total number of observations sampled. This operation results in a $n\times n$ distance matrix with values in the range between 0 and 1, where 0 is indicative of exact resemblance and 1 of complete dissimilarity.
+
+Formally, PERMANOVA is a geometric partitioning of variation across the data in the space of the chosen distance metric in response to one or more factors [@Anderson2017]. When Euclidean distances are used, the null hypothesis ($H_0$) states that the positions of the centroids for every group in the dissimilarity matrix are equivalent [@Anderson2013]. However, the term *central locations* is more appropriate for other distance matrices, such as $BC$. This hypothesis testing requires the estimation of ANOVA-like statistics and finally the obtention of a $p$-value through a process of permutation, i.e. the random shuffling of observations between groups [@Anderson2001]. $H_0$ operates under the assumption that observations are exchangeable between groups and therefore permutation should not have an effect on the central location of the different groups. 
+
+Briefly, the classic ANOVA relationship between the total sum of squares ($SS_T$), the within-group or residual sum of squares ($SS_W$) and the sum of squares between groups ($SS_B$) holds: $SS_T = SS_W + SS_B$. The PERMANOVA table can be constructed from the following operations:
+
+\begin{equation} 
+  SS_T = \frac{1}{N} \sum^{N-1}_{i=1}\sum_{j = i + 1}^N BC^2_{ij}\text{ ,}\\
+  (\#eq:SST)
+\end{equation}
+
+where $N$ stands for the total number of observations, $i = 1,\ldots,N$ and $j = 2, \ldots, N$;
+
+\begin{equation} 
+  SS_W = \sum^G_{g=1}\left(\frac{1}{n_g} \sum^{N-1}_{i=1}\sum_{j = i + 1}^N BC^2_{ij}\varepsilon^{[g]}_{ij}\right),\\
+  (\#eq:SSW)
+\end{equation}
+where $G$ stands for the total number of groups, $n_g$ is the number of observations belonging to group $g$ and $\varepsilon^{[g]}_{ij}$ is a binary indicator that takes the value 1 when $i$ and $j$ belong to group $g$ and 0 otherwise;
+
+\begin{equation} 
+  SS_B = SS_T - SS_W \text{ .}\\
+  (\#eq:SSB)
+\end{equation}
+
+Now, a ratio between signal ($SS_B$) and noise ($SS_W$) can be obtained in the form of a pseudo $F$ statistic:
+
+\begin{equation} 
+  F = \frac{\frac{SS_B}{(G-1)}}{\frac{SS_W}{(N-G)}} \text{ .}\\
+  (\#eq:pseudo-F)
+\end{equation}
+
+Under $H_0$, this ratio will be near to 1, but when the central locations of the groups really differ, $SS_B$ will take relatively large values compared to $SS_W$. This causes an increase in the pseudo $F$-ratio. However, since the dependent variables, i.e. the parts, are neither normally distributed nor independent, a $p$-value cannot be obtained the regular way. The permutation algorithm is used to generate an empirical $F$ distribution from an arbitrary number of re-orderings of the observations ($M$). Thus, an alternative for the obtention of $p$-values is based on the proportion of permuted pseudo $F$ statistics ($F^\pi$) that are greater than the observed $F$ statistic [@Anderson2001]: 
+
+\begin{equation} 
+  p = \frac{\sum_{i=1}^M f(F_i^\pi)}{M}, f(F_i^\pi) = \begin{cases} 1 \text{ if } F_i^\pi \geq F \\ 0 \text{ otherwise} \end{cases}\text{ .}\\
+  (\#eq:pval)
+\end{equation}
+
+If the obtained $p$-value is lower than the significance level ($\alpha$) of choice, then $H_0$ is rejected, since the assumptions of exchangeability and equivalence of central locations between groups seem unlikely. In terms of the pseudo $F$ statistic, under $H_1$ the signal to noise ratio is, most of the times, larger in the original dataset than in the permutations. 
+
+An important drawback of PERMANOVA is that it can confound location and dispersion differences between groups in unbalanced designs [@Anderson2001; @Anderson2013]. However, PERMDISP, a multivariate analog of Levene's test for homogeneity of variances, can be used alongside PERMANOVA to better understand its results [@Anderson2006]. The null hypothesis of PERMDISP considers that the average within-group dispersion does not differ among groups, even if their central locations do.
+
+In \texttt{R}, PERMANOVA and PERMDISP tests are implemented, respectively, in \texttt{adonis()} and \texttt{betadisper()} functions of package \texttt{vegan} (version 2.5-7).
+
+### Principal Component Analysis
+
+In order to identify the compositional patterns between the phylum and habitat groupings, principal component analysis was performed. This exploratory data analysis has the aim of mapping the observations in a space of reduced dimensions that capture as much of the original variation as possible. Prior to this, this type of exploratory analysis requires steps for imputation of zero values and transformation of the raw data into logratios. 
+
+In the first place, null observations, i.e. zero vectors, have to be excluded for being non-informative from a compositional point of view. This can occur when the library size is too small and not a single viral read or contig was found. Another step for dimensionality reduction, now in the parts, can be considered prior to imputation of zeros. Since it is impossible to certainly identify the types of zeros that are causing the sparsity in the dataset, arbitrary decisions can be taken under plausible assumptions to handle this problem [@Xia2018b]. In this case, rare families that are only found once in the data were discarded under the assumption that the proportion of structural zeros in that part is higher than in parts of more common occurrence. We then assume that the remaining zeros in the matrix are rounded or sampling zeros, which can be imputed. Also those families with a maximum relative frequency among the whole dataset lower than $0.01\%$ were excluded from the subcompositions. These treatments for sparsity can also be useful for the rounded or sampling zeros present in these rare parts, since the imputed abundance could be greater than their real abundance.
+
+In the case of count tables, the remaining zeros were imputed by the Bayesian-multiplicative replacement  method [@Martin-Fernandez2014] implemented in function \texttt{cmultRepl()} of package \texttt{zCompositions} (version 1.4.0). This strategy does not alter the ratios between observed components and is based on the conjugation of a Dirichlet prior to the multinormal distribution, since the classification of $N$ reads into $D$ categories can be considered a multinomial experiment. Meanwhile, \texttt{multRepl()} (also in \texttt{zCompositions}) was used for the treatment of sparsity in continuous abundance tables resulting from contig classification methods. This approach imputes small values over rounded zeros through a non-parametric multiplicative simple method. An arbitrary detection limit of $0.001$ tpm was specified to replace zeros by values lower than this threshold. Again, the ratios between originally non-zero parts are preserved, it is the sum of the composition that sees a slight increase.
+
+Once all values in the matrix of (sub)compositions are strictly positive, logratio transformations can be applied. For the purpose of PCA under the compositional data analysis framework, the centered logratio (*clr*) transformation is commonly used [@Quinn2018] for its interpretability and also because it avoids the subjectivity of choosing a reference part, in contrast to additive logratio (*alr*) coordinates. It can be demonstrated that *clr*-transformed data satisfy the key properties of compositional data and maintain the metric features of the simplex [@Filzmoser2018c]. The *clr* transformation $y \in \mathbb{R}^D$ of a composition $x \in \tilde{S^D}$ is obtained using the geometric mean of $x$ ($g_m(x)$) in the denominator of the ratio: 
+
+\begin{equation} 
+  y = \left(log\frac{x_1}{g_m(x)}, \ldots, log\frac{x_D}{g_m(x)}\right)\text{ , where } g_m(x) = \sqrt[D]{\prod^D_{k=1}x_k}\text{ .}\\
+  (\#eq:clr)
+\end{equation}
+
+Some of the most important characteristics of the *clr*-transformed vector $y$ are *(i)* that the sum (hence also the mean) of all elements in $y$ is zero, *(ii)* the sample space of $y$ is the real Euclidean space and *(iii)* the Aitchison distance ($d_A$) between two equally dimensioned compositions $x_1$ and $x_2$ is equivalent to the Euclidean distance ($d$) of their transformed vectors of *clr* coefficients ($y_1,y_2$). Consequently, standard multivariate statistical analyses are now applicable, as we have now *moved from the simplex*. It is worth mentioning that an inverse operation exists to transform *clr* vectors back to compositions in the simplex, although the original total sum $\kappa$ of the composition is lost in the *clr* transformation, since it focuses only on the relative information. In other words, all representatives of the equivalence class of a composition yield the same *clr* coefficients and thus, it is impossible to know the scaling factor needed to reproduce the original representative just from its *clr* coefficients. In \texttt{R}, *clr* transformation and its inverse are implemented, respectively, in \texttt{clr()} and \texttt{clrInv()} functions of package \texttt{compositions} (version 2.0.4).
+
+PCA can now be performed either by singular value decomposition (SVD) of the transformed matrix or by eigendecomposition of its variance-covariance matrix. In both cases, the total variance of an input $n \times D$ matrix is now explained by a set of $D$ orthogonal principal components. These principal components are a linear combination of the $D$ original columns with decreasing explanatory power from 1 to $D$. The variances in the original matrix and in the obtained scores matrix are equivalent, as can be seen in the trace of their variance-covariance matrices.
+
+The results in \texttt{R} using \texttt{prcomp()} for SVD and \texttt{princomp()} for eigendecomposition are fairly similar. In this case, \texttt{prcomp()} was used over the matrix of *clr* coefficients without standardizing the data. While the observations are already centered in 0, the variances can differ between the *clr* coefficients. This responds to the variation between the original compositions generated by each particular part with respect to the whole. In summary, the rescaling of the *clr*-transformed matrix prior to SVD was ruled out, since all coefficients are generated by the same procedure and expressed in the same units. 
+
+This seems specially appropriate for virome community analyses, where, for instance, a viral family can be absent in some samples but very dominant in other ones with an ongoing infection. Meanwhile, other families, mainly those that arise from contamination of other organisms, can be found in a relatively stable proportion, thus generating few variation among samples. This relevant information is better captured in the PCA without rescaling the coefficients prior to SVD. 
+
+Finally, the two principal components that explain the most variance and/or generate a segregation of groups with higher resolution will be chosen to draw a biplot, a two-dimensional graphical tool that allows to interpret the PCA simultaneously in terms of scores, i.e. locations of observations in the two-dimensional space of the selected principal components, and loadings, i.e to what degree does each part contribute to the variance explained by each principal component through the norm and direction of its loadings vector. In this figure, patterns of abundance variation across the data can be identified for, at least, the most influential viral families, i.e. which show the most variation between observations.
+
+## Results
+
+In this section, the focus will be laid on the validation and comparison of bioinformatic and statistical methods for the definitive analysis. Special attention will also be focused on avoiding possible sources of bias.
+
+### Description of the sampled observations
+
+All 138 sampled run accessions belong to 56 unique species distributed across nine phyla and four habitats. However, the sampling distribution at the three of these levels is highly unbalanced (Figure \@ref(fig:sample50freq)). For DIAMOND, VirFinder and VirSorter2 pipelines, a subset of 25 run accessions was used due to time constraints. In this case, 16 species of Annelida, Arthropoda and Cnidaria were represented. Apart from the unbalance, an important feature of these datasets is a remarkable degree of collinearity between phylum and habitat, since habitats rarely vary within a phylum (Figure \@ref(fig:sample50freq) A). Obviously, one cannot expect an uniform distribution of the arbitrarily defined habitats within each phylum, but some phyla will consistently belong to one or few specific habitats. However, even if no habitat variation was to be found within phyla, this factor could still be valuable as a manner to aggregate phyla.
+
+```{=latex}
+\begin{figure}[!htbp]
+```
+```{r sample50freq, echo = F, fig.height=4, fig.width=9, results=F}
+kaiju <- read.csv(file = "data/sample50/absabun_merged_001.csv")
+diam <- read.csv(file = "data/sample50/diamond_def_tpm.csv")
+kaiju$phylum <- factor(kaiju$phylum)
+levels(kaiju$phylum) <- c("ANN", "ART", "BRA", "CNI", "NMD", "PLT", "POR", "ROT", "URO")
+
+library(ggplot2)
+library(ggthemes)
+suppressPackageStartupMessages(library(gridExtra))
+
+T1 <- as.data.frame(table(kaiju$habitat, kaiju$phylum))
+T2 <- as.data.frame(table(kaiju$species))
+colnames(T1) <- c("Habitat", "Phylum", "Frequency")
+colnames(T2) <- c("Species", "Frequency")
+
+plot1 <- ggplot(T1,aes(x=Phylum,y=Frequency,fill=Habitat)) + geom_col(width=0.3) +  
+  theme_bw() + scale_color_manual(values=c("#34ed84", "#7d04d4", "#0767de", "#8a0c00")) + 
+  theme(legend.position="bottom", panel.grid.major = element_blank()) + ylab("Sampled accessions") + ggtitle("A")
+
+plot2 <- ggplot(T2,aes(x=Species,y=Frequency)) + 
+  geom_col(width=0.25) +  theme_bw() + xlab("Species") + ylab("Sampled accessions") + 
+  annotate("text", x=38, y=43, label= "Exaiptasia diaphana (CNI)", size = 3) + 
+  theme(axis.ticks.x = element_blank(), axis.text.x = element_blank(), panel.grid.major = element_blank()) + ggtitle("B")
+
+grid.arrange(plot1, plot2, ncol=2, widths = c(1.4,1))
+
+```
+```{=latex}
+\caption{Distribution of all 138 sampled accessions across (\textbf{B}) species, (\textbf{A}) phyla and habitats (Pilot). \label{fig:sample50freq}}
+\textbf{A.} Most of the sampled accessions belong to annelids, arthropods, nematodes, platyhelminths and, especially, cnidarians. Meanwhile, only one to three accessions have been sampled from Brachiopoda, Porifera, Rotifera and Urochordata. This also occurs for habitat factor, with marine and terrestrial habitats being the most prevalent. There is a unique habitat per phylum except for nematodes and platyhelminths. \textbf{B.} While most of sampled species are represented by one to six accessions, cnidarian species Exaiptasia diaphana accounts for nearly one third of the total number of accessions. It is problematic to consider the accessions of this species as independent members of Cnidaria for belonging to the same species and, most of them, to the same BioSample (SRS742511).
+
+\end{figure}
+```
+
+### Kaiju results
+
+#### Description and univariate analysis of diversity
+
+Using RVDB as a database and an E-value threshold of $0.01$, 76 viral families were identified for all 138 datasets. 24 of these families have less than 10 reads assigned among all samples. Alternatively, 18 viral families are found only in a particular sample. In contrast, other families are much more consistently found: *Mimiviridae* (in $98\%$ of the samples), *Herpesviridae* ($96\%$), *Poxviridae* ($95\%$), *Retroviridae* ($93\%$), *Marseilleviridae* ($84\%$), *Baculoviridae* ($84\%$), etc. Since most of these families harbor dsDNA viruses, this suggests that their RNA transcripts have been identified in almost all samples. The most frequently found RNA virus families are *Hepeviridae* ($82\%$), *Flaviviridae* ($81\%$), *Partitiviridae* ($80\%$), *Nairoviridae* ($76\%$), *Reoviridae* ($73\%$), etc. Among these families, *Mimiviridae*, *Marseilleviridae* (protists) and *Hepeviridae* (vertebrates) are not reported to infect invertebrates. However, the classification of sequences into these families can be the result of sample contamination by other organisms or a lack of specificity by Kaiju. Still, this is not a problem, since the aim of the study is to characterize the communities of viruses associated to different invertebrates, not only the viruses that are able to infect them, i.e. the characterization of their metavirome and not only their virome *sensu stricto*.
+
+Also, there is no support to confirm that sequences assigned to families that are known to infect invertebrates belong, in fact, to fully functional viruses, but these transcripts could represent transcriptionally active EVEs. Unclassified viruses, i.e. virus species without a family assigned, also have to be taken into consideration as a further part of the virome composition, thus reaching up to 77 components. Unclassified viruses were identified in $94\%$ of the samples and account for $17.5\%$ of all viral reads, second most predominant component after *Retroviridae* ($35.1\%$). It appears that the relative abundance of unclassified viruses is lower in marine invertebrates (Figure \@ref(fig:kaijudiv) C).
+
+With reference to the sparsity of the dataset, no viral reads were found in three samples, all belonging to *Exaiptasia diaphana*. Furthermore, nearly $74\%$ of all cells in the abundance matrix contained zero values. The idea of sparsity is related to $\alpha$-diversity ($F$), which for each row equals the number of non-zero cells regardless of abundance. For most of the samples, around 23 families were observed ($IQR$^[Interquartile range ($IQR$): the absolute difference between the third and the first quartiles, which are equivalent to the 75th and the 25th percentiles, respectively.]$= 26.00 - 19.25$). In this distribution, outliers are predominantly found in the lower end of the distribution (Figure \@ref(fig:kaijudiv) A). The same is the case of Shannon diversity index ($H^\prime$) distribution, which takes into account the evenness of the communities (Figure \@ref(fig:kaijudiv) B). In this case, observed $H^\prime$ values lie in the range between 0 and $2.30$ with median in $1.73$ and $IQR = 1.93-1.27$. In the literature, mostly $H^\prime$ values below 1 have been reported for viromes of vertebrates such as birds [@Geoghegan2021] and viromes of soil samples [@Adriaenssens2017], both using DIAMOND blastx. So, the default $0.01$ E-value threshold for Kaiju might be too liberal, causing an overall presence and abundance of false positives in the taxonomic classification. This is aggravated by the effect of library size on the observed diversity without which the distributions for both $F$ and $H^\prime$ would lie in higher values: all observations with 15 or less reported families have library sizes of less than 3 Gb (Figure \@ref(fig:kaijudiv) D). This suggests a high frequency of sampling zeros among these observations, since their lower diversity is an artifact of an insufficient sequencing depth.
+
+Since unbalanced sample sizes are present in the dataset for phylum and habitat factors, an ANOVA analysis with type III SS can be performed to evaluate the effect of both factors on viral diversity at family level. Building a linear additive model for $H^\prime$ in function of both factors (reference categories: ANN, Freshwater) and the logarithm of library size ($log($Gb$)$), only the regression coefficient for $log($Gb$)$ is significant with $\alpha = 0.05$, indicating that phylum and habitat do not have a significant effect on $H^\prime$. Very similar results are obtained for $F$, where $40\%$ of the variance is explained by $log($Gb$)$ and only the coefficient for nematodes is significantly different from 0. Still, the observed ANOVA $F$ statistic for the phylum factor results in $P > 0.05$ in ANOVA and, therefore, the null hypothesis of no differences among phyla prevails.
+
+In summary, these ecological univariate metrics do not appear to be significantly affected by phylum and habitat factors for Kaiju results. Furthermore, specific community structure does not sufficiently describe the virome, since $H^\prime$ takes into account the distribution of abundances not in a part-specific manner, but just in terms of evenness.
+
+```{=latex}
+\begin{figure}[!htbp]
+```
+```{r kaijudiv, echo = F, fig.height=7, fig.width=11, results =F}
+diff_fams <- function(comp.vec){
+  length(comp.vec[which(comp.vec > 0)])
+}
+shannon <- function(comp.vec){
+  obj <- t(comp.vec / sum(comp.vec) * log(comp.vec / sum(comp.vec)))
+  obj[is.nan(obj)] <- 0
+  return(-1 * sum(obj))
+}
+kaiju <- read.csv(file = "data/sample50/absabun_merged_001.csv")
+
+df <- read.delim("data/db_def_con_DNA.tsv", header = T)
+kaiju <- cbind(dplyr::filter(df, run %in% kaiju$accession)[order(dplyr::filter(df, run %in% kaiju$accession)$run),], kaiju[order(kaiju$accession),6:82])
+kaiju$bases <- kaiju$bases / 1e9
+
+kaiju$phylum <- factor(kaiju$phylum)
+kaiju$habitat <- factor(kaiju$habitat)
+levels(kaiju$phylum) <- c("ANN", "ART", "BRA", "CNI", "NMD", "PLT", "POR", "ROT", "URO")
+
+comp.mat <- kaiju[,(which(colnames(kaiju) == "bases") + 1):dim(kaiju)[2]]
+relabun <- comp.mat / apply(comp.mat, 1, sum)
+
+diversize <- data.frame(run = kaiju$run, species = kaiju$species, phylum = kaiju$phylum, 
+                        habitat = kaiju$habitat, bases =kaiju$bases, comp.mat)
+
+transparent <- rgb(0, 0, 255, max = 255, alpha = 0)
+
+par(mfrow = c(2,2), mar = c(4,4,3,2))
+
+#### ALPHA DIV ####
+boxplot(apply(diversize[,6:82], 1, diff_fams) ~ diversize$phylum, 
+        col = c(rep("dodgerblue", 2), transparent, rep("dodgerblue", 3), rep(transparent, 3)), 
+        border = c(rep(1, 2), transparent, rep(1, 3), rep(transparent, 3)), 
+        outcol = "dodgerblue", pch = 16, cex = 1.2, cex.axis = 0.9, las = 1, 
+        xlab = "Phylum", ylab = expression(paste(alpha, "-diversity (F)")), adj = 0, main = "A                                                                                        ")
+boxplot(apply(diversize[,6:82], 1, diff_fams) ~ diversize$phylum, 
+        col = c(rep("dodgerblue", 2), transparent, rep("dodgerblue", 3), rep(transparent, 3)), 
+        border = c(rep(1, 2), transparent, rep(1, 3), rep(transparent, 3)), 
+        pch = 1, cex = 1.2, add = T, xaxt = "n", yaxt = "n")
+scarce <- as.numeric(diversize$phylum[which(diversize$phylum %in% c("BRA", "POR", "ROT", "URO"))]) + 
+  c(0, 0, -0.05, -0.05, 0.05, 0.05, 0)
+points(scarce, apply(diversize[which(diversize$phylum %in% c("BRA", "POR", "ROT", "URO")),6:82], 1, diff_fams), 
+       pch = 16, col = "dodgerblue", cex = 1.2)
+points(scarce, apply(diversize[which(diversize$phylum %in% c("BRA", "POR", "ROT", "URO")),6:82], 1, diff_fams), cex = 1.2)
+####
+
+#### SHANNON ####
+boxplot(apply(diversize[,6:82], 1, shannon) ~ diversize$phylum, 
+        col = c(rep("dodgerblue", 2), transparent, rep("dodgerblue", 3), rep(transparent, 3)), 
+        border = c(rep(1, 2), transparent, rep(1, 3), rep(transparent, 3)), 
+        outcol = "dodgerblue", pch = 16, cex = 1.2, cex.axis = 0.9, las = 1, 
+        xlab = "Phylum", ylab = "Shannon diversity index (H')", adj = 0, main = "B                                                                                          ")
+boxplot(apply(diversize[,6:82], 1, shannon) ~ diversize$phylum, 
+        col = c(rep("dodgerblue", 2), transparent, rep("dodgerblue", 3), rep(transparent, 3)), 
+        border = c(rep(1, 2), transparent, rep(1, 3), rep(transparent, 3)),
+        pch = 1, cex = 1.2, add = T, xaxt = "n", yaxt = "n")
+scarce <- as.numeric(diversize$phylum[which(diversize$phylum %in% c("BRA", "POR", "ROT", "URO"))]) +
+  c(0, 0, -0.05, -0.05, 0.05, 0.05, 0)
+points(scarce, apply(diversize[which(diversize$phylum %in% c("BRA", "POR", "ROT", "URO")),6:82], 1, shannon), 
+       pch = 16, col = "dodgerblue", cex = 1.2)
+points(scarce, apply(diversize[which(diversize$phylum %in% c("BRA", "POR", "ROT", "URO")),6:82], 1, shannon), cex = 1.2)
+
+#### Porcentaje unclass ####
+
+boxplot(relabun$Unclassified ~ diversize$phylum, 
+        col = c(rep("dodgerblue", 2), transparent, rep("dodgerblue", 3), rep(transparent, 3)), 
+        border = c(rep(1, 2), transparent, rep(1, 3), rep(transparent, 3)), 
+        outcol = "dodgerblue", pch = 16, cex = 1.2, cex.axis = 0.9, las = 1, 
+        xlab = "Phylum", ylab = "Proportion of unclassified viruses", adj = 0, main = "C                                                                                           ")
+boxplot(relabun$Unclassified ~ diversize$phylum, 
+        col = c(rep("dodgerblue", 2), transparent, rep("dodgerblue", 3), rep(transparent, 3)), 
+        border = c(rep(1, 2), transparent, rep(1, 3), rep(transparent, 3)),
+        pch = 1, cex = 1.2, add = T, xaxt = "n", yaxt = "n")
+scarce <- as.numeric(diversize$phylum[which(diversize$phylum %in% c("BRA", "POR", "ROT", "URO"))]) +
+  c(0, 0, -0.05, -0.05, 0.05, 0.05, 0)
+points(scarce, relabun$Unclassified[which(diversize$phylum %in% c("BRA", "POR", "ROT", "URO"))], 
+       pch = 16, col = "dodgerblue", cex = 1.2)
+points(scarce, relabun$Unclassified[which(diversize$phylum %in% c("BRA", "POR", "ROT", "URO"))], cex = 1.2)
+
+
+#### alfa richness vs bases ####
+
+plot(diversize$bases, apply(comp.mat, 1, diff_fams), col = rainbow(9)[diversize$phylum], pch = 16, las = 1,
+     main = "D                                                                                          ", xlab = "Library size (Gb)", ylab = expression(paste(alpha, "-diversity")))
+legend(x = 20, y = 10.5, legend = c("ANN", "ART", "BRA"), pch = 15, col = rainbow(9)[1:3], cex = 1, bty = "n")
+legend(x = 27, y = 10.5, legend = c("CNI", "NMD", "PLT"), pch = 15, col = rainbow(9)[4:6], cex = 1, bty = "n")
+legend(x = 34, y = 10.5, legend = c("POR", "ROT", "URO"), pch = 15, col = rainbow(9)[7:9], cex = 1, bty = "n")
+lines(x = c(19,19,50,50), y = c(-30,12,12,-30))
+
+mod <- lm(apply(comp.mat, 1, diff_fams) ~ log(diversize$bases))
+# summary(mod)
+xx <- seq(0,50, by = 0.1)
+yy <- mod$coefficients[1] + log(xx)*mod$coefficients[2]
+lines(xx,yy)
+text(x = 10, y = 8, labels = expression(bold(paste(R^"2", " = 0.40"))), cex = 1.1)
+abline(v = 3, lty = 2)
+####
+
+# summary(lm(apply(relabun, 1, shannon) ~ kaiju$phylum + kaiju$habitat + log(kaiju$bases)))
+# summary(lm(apply(relabun, 1, diff_fams) ~ kaiju$phylum + kaiju$habitat + log(kaiju$bases)))
+# Anova(lm(apply(relabun, 1, shannon) ~ kaiju$phylum + kaiju$habitat + log(kaiju$bases)), type = "3")
+# Anova(lm(apply(relabun, 1, diff_fams) ~ kaiju$phylum + kaiju$habitat + log(kaiju$bases)), type = "3")
+
+
+```
+```{=latex}
+\caption{Overview of univariate diversity measures for Kaiju results (Pilot). \label{fig:kaijudiv}}
+The distribution of $\alpha$-diversity (\textbf{A}) and H' (\textbf{B}) does not appear to be significantly different between invertebrate phyla. Reported H' is 0 for null observations, although technically it cannot be determined with $F=0$. Limited sample size, the bias introduced by variable library size and a high rate of false positives in the taxonomic classification could have masked true difference between phyla. \textbf{C.} The proportion of unclassified viruses is positively affected by $log($Gb$)$ and is significantly lower in Cnidaria, Porifera and Urochordata ($P < 0.05$, reference: ANN), where all samples are marine. Possibly, the description of novel viruses highly-divergent to accepted families has been more intense in terrestrial than marine environments. \textbf{D.} Viral families richness $F$ is best explained by the logarithm of the bases. A simple linear model including only this covariate explains 40\% of the variance. An arbitrary vertical line has been placed at $3$ Gb to illustrate that the bias introduced by library size is mainly critical for smaller library sizes.
+
+\end{figure}
+```
+
+#### PERMANOVA
+
+Before proceeding with PERMANOVA, null observations will be excluded from the analysis. Additionally, the number of samples for *Exaiptasia diaphana* will be reduced to just three observations with largest library size ($2.7$ - $3.3$ Gb) to avoid both the overrepresentation of a species and the bias of its low library sizes, resulting in a subset of 98 observations. In the process, two viral families lose their only non-zero observations and, thus, turn uninformative.
+
+The two possible one-way PERMANOVA using phylum and habitat factors were constructed using the Bray-Curtis dissimilarity matrix. In both cases, the observed pseudo $F$-statistic supported rejection of $H_0$ at $\alpha < 0.05$, thus showing that central locations and/or dispersions do differ among groups. For the simple habitat model, $12.4\%$ of the variance in the dissimilarity matrix could be explained by habitat differences, while for the phylum model the $R^2$ statistic reached a value of $21.8\%$. However, the two-way PERMANOVA including both factors was able to explain nearly $25\%$ of the variance and the significance of the $p$-values was affected by the order of inclusion of factors, i.e. habitat factor only showed association with differences in location and/or dispersion when added before phylum. In summary, this is indicative of a high degree of collinearity, where most of the differences in the $BC$ dissimilarity matrix among habitats can be explained by the phylum of the invertebrate host. The classical Akaike Information Criterion ($AIC$) was calculated for each model to find if the added complexity offsets the slightly higher goodness of fit. According to $AIC$, the model with the best selection of variables to explain the generating process of the data was the one-way PERMANOVA with phylum factor ($AIC_{phyl} = 313.6$; $AIC_{hab} = 314.7$; $AIC_{phyl,hab} = 315.4$). The difference is small between $AIC$ of both simple models although the phylum model was able to explain almost twice of the variance, since the number of categories is considerably larger for phylum factor.
+
+```{=latex}
+\begin{figure}[!htbp]
+```
+```{r sample50pcoakaiju, echo = F, results=F, fig.height=6, fig.width=8}
+suppressPackageStartupMessages(library(vegan))
+# https://github.com/kdyson/R_Scripts
+AIC.PERMANOVA <- function(adonis.model) {
+    
+    # check to see if object is an adonis model...
+    
+    if (!(adonis.model$aov.tab[1,1] >= 1))
+        stop("object not output of adonis {vegan} ")
+    
+    # Ok, now extract appropriate terms from the adonis model
+    # Calculating AICc using residual sum of squares (RSS) since I don't think that adonis returns something I can use as a liklihood function...
+    
+    RSS <- adonis.model$aov.tab[rownames(adonis.model$aov.tab) == "Residuals", "SumsOfSqs"]
+    MSE <- adonis.model$aov.tab[rownames(adonis.model$aov.tab) == "Residuals", "MeanSqs"]
+    
+    k <- ncol(adonis.model$model.matrix)# + 1 # add one for error variance
+    
+    nn <- nrow(adonis.model$model.matrix)
+    
+    # AIC : 2*k + n*ln(RSS)
+    # AICc: AIC + [2k(k+1)]/(n-k-1)
+
+    # based on https://en.wikipedia.org/wiki/Akaike_information_criterion;
+    # https://www.researchgate.net/post/What_is_the_AIC_formula;
+    # http://avesbiodiv.mncn.csic.es/estadistica/ejemploaic.pdf
+    
+    # AIC.g is generalized version of AIC = 2k + n [Ln( 2(pi) RSS/n ) + 1]
+    # AIC.pi = k + n [Ln( 2(pi) RSS/(n-k) ) +1],
+    
+    AIC <- 2*k + nn*log(RSS)
+    AIC.g <- 2*k + nn * (1 + log( 2 * pi * RSS / nn))
+    AIC.MSE <- 2*k + nn * log(MSE)
+    AIC.pi <- k + nn*(1 + log( 2*pi*RSS/(nn-k) )   )
+    AICc <- AIC + (2*k*(k + 1))/(nn - k - 1)
+    AICc.MSE <- AIC.MSE + (2*k*(k + 1))/(nn - k - 1)
+    AICc.pi <- AIC.pi + (2*k*(k + 1))/(nn - k - 1)
+    
+    output <- list("AIC" = AIC, "AIC.g" = AIC.g, "AICc" = AICc,
+                   "AIC.MSE" = AIC.MSE, "AICc.MSE" = AICc.MSE,
+                   "AIC.pi" = AIC.pi, "AICc.pi" = AICc.pi, "k" = k)
+    return(output)   
+}
+
+kaijured <- rbind(kaiju[which(kaiju$species != "Exaiptasia diaphana"),], 
+                  kaiju[which(kaiju$run %in% c("SRR6202261", "SRR6202279", "SRR6202281")),])
+
+relabunred <- rbind(relabun[which(kaiju$species != "Exaiptasia diaphana"),], 
+                    relabun[which(kaiju$run %in% c("SRR6202261", "SRR6202279", "SRR6202281")),])
+
+kaijured <- kaijured[, -which(apply(kaijured[,20:96], 2, sum) == 0)-19]
+# relabunred <- relabunred[, -which(apply(relabunred, 2, sum) == 0)-19]
+
+PERM_BC <- adonis(kaijured[,20:dim(kaijured)[2]] ~ phylum, data = kaijured, permutations=1000, method = "bray")
+# PERM_BC_rel <- adonis(relabunred ~ phylum, data = kaijured, permutations=1000, method = "bray") # Note how pseudo F statistic is affected by scale change
+PERM_BC$aov.tab
+AIC.PERMANOVA(PERM_BC)$AIC
+bcdist <- vegdist(kaijured[,20:dim(kaijured)[2]], method = "bray")
+PERMDISP_BC <- betadisper(bcdist, kaijured$phylum, type = "centroid")
+anova(betadisper(bcdist, kaijured$phylum)) # P = 0.13 > 0.05
+
+## PCoA plot ####
+par(mar = c(4,4,4,0))
+laymat <- matrix(c(1, 2), ncol = 2)
+layout(laymat, widths = c(5,1), heights = c(1,1))
+#boxplot(PERMDISP_BC, col = rainbow(9), ylab = "Distance to central location", xlab = "Phylum")
+suppressWarnings(plot(PERMDISP_BC, label = F, ellipse = T, hull = F,
+                      col = rainbow(9), pch = c(0:4,15:18),
+                      xlab = paste("PCo1 (", round(100*abs(PERMDISP_BC$eig[1]) /
+                                                     sum(abs(PERMDISP_BC$eig)), 2), "%)"),
+                      ylab = paste("PCo2 (", round(100*abs(PERMDISP_BC$eig[2]) /
+                                                     sum(abs(PERMDISP_BC$eig)), 2), "%)"),
+                      main = "", las = 1, xlim = c(-0.4,0.3), cex = 1.1, lwd = 1.75))
+abline(v = 0, h = 0, lty = 2, col = "grey60")
+par(mar = c(2,2,2,0))
+plot(1,2, pch = 1, lty = 1, ylim=c(-10,10),
+     type = "n", axes = FALSE, ann = FALSE)
+
+legend(x = "center", legend= levels(kaijured$phylum), col= rainbow(9), pch = c(0:4, 15:18), bty = "n", cex = 1.1)
+##
+
+# library(png)
+# pcoa.plot <-readPNG("_book/_main_files/PCoA_Kaiju_Bray_Curtis.png")
+# #get size
+# h<-dim(pcoa.plot)[1]
+# w<-dim(pcoa.plot)[2]
+# 
+# par(mar=c(0,0,0,0), xpd=NA, mgp=c(0,0,0), oma=c(0,0,0,0), ann=F)
+# plot.new()
+# plot.window(0:1, 0:1)
+# 
+# #fill plot with image
+# usr<-par("usr")    
+# rasterImage(pcoa.plot, usr[1], usr[3], usr[2], usr[4])
+
+# Y <- cmdscale(bcdist, k = 2, eig = T)
+# plot(Y$points[,1], Y$points[,2], col = rainbow(9)[as.numeric(kaijured$phylum)], pch = c(0:4,15:18)[as.numeric(kaijured$phylum)])
+# Y$points
+# PCOA <- data.frame(PC1 = Y$points[,1], PC2 = Y$points[,2], phylum = kaijured$phylum)
+# centroids <- cbind(as.vector(by(PCOA$PC1, PCOA$phylum, mean)), as.vector(by(PCOA$PC2, PCOA$phylum, mean)))
+# text(centroids, col = rainbow(9), labels = levels(PCOA$phylum))
+```
+```{=latex}
+\caption{Principal Coordinate Analysis of Bray-Curtis dissimilarity matrix with Kaiju results (Pilot).\label{fig:sample50pcoakaiju}}
+The positions of the samples in the space of the two first principal coordinates are connected to their phylum's central location by grey segments. In this case, medians were computed instead of centroids, which are more sensitive to outliers. Ellipses represent one standard deviation from the group's median. Within-group dispersion is very notable, as, for instance, cnidarian observations are spread across most of the overall dispersion range in the first two principal coordinates. With respect to the differences in the medians of most frequent phyla, viromes of cnidarians (marine) are most distant to those of platyhelminths (mostly freshwater), while viromes of annelids, arthropods and nematodes (mostly terrestrial) lie in between.
+
+\end{figure}
+```
+
+Next, PERMDISP test was performed over $BC$ to examine if the phylum groupings produced homogeneous within-group dispersions ($H_0$). According to this test, homogeneity of group variances can be accepted for the simple phylum model ($p$-value$> 0.05$), indicating that the rejection of $H_0$ in PERMANOVA is due to true differences in the central locations between phyla. As a means to visualize location and dispersion across phyla, Principal Coordinates Analysis (PCoA) was performed over the $BC$ dissimilarity matrix. With this method of metric multidimensional scaling, an Euclidean square matrix of orthogonal columns is obtained, allowing the representation of the observations in a bidimensional space with a limited loss of information. In this case, the first two principal coordinates explained $46.8\%$ ($26.0\% + 20.8\%$) of the variation in the data. This goodness of fit was calculated by the ratio between the sum of the eigenvalue for these two coordinates and the sum of the absolute value of all eigenvalues.
+
+In Figure \@ref(fig:sample50pcoakaiju), observations are represented in the Euclidean space of the first two principal coordinates. Most observations are located in the right quadrants, although some of them are scattered in the left quadrants at a long distance from their phylum's respective median. Medians and dispersion ellipses of arthropods and annelids, both with exclusively terrestrial observations sampled, are very nearly located, suggesting that their average viromes are similar according to Kaiju taxonomic classification. Platyhelminthes samples, mostly freshwater, are fairly separate from cnidarians, except for the single observation of "Intertidal zone" habitat, which is ecologically related to marine environments. 
+
+Although some interesting observations can be made, the data has a considerable amount of within-group dispersion or *noise* overall. Apart from that, some issues arise for the dataset, namely, *(i)* the inclusion of groups with one or two observations for PERMANOVA and PERMDISP is problematic, since the within-group dispersion is 0 or symmetrical, respectively and *(ii)* although the use of the $BC$ dissimilarity matrix is fairly well established among microbiome and virome analysts, it does not embrace the compositional nature of the data [@Gloor2017]. Its main drawback is that it is sensitive to scale variation, e.g. sequencing depth, along with other violations of compositional data principles. Under the compositional framework, the Aitchison distance is preferred for being more stable and satisfying the principles of compositional data.
+
+```{r echo = F}
+# 25 color palette
+c25 <- c(
+  "dodgerblue2", "#E31A1C", # red
+  "green4",
+  "#6A3D9A", # purple
+  "#FF7F00", # orange
+  "black", "gold1",
+  "skyblue2", "#FB9A99", # lt pink
+  "palegreen2",
+  "#CAB2D6", # lt purple
+  "#FDBF6F", # lt orange
+  "gray70", "khaki2",
+  "maroon", "orchid1", "deeppink1", "blue1", "steelblue4",
+  "darkturquoise", "green1", "yellow4", "yellow3",
+  "darkorange4", "brown"
+)
+```
+
+
+
+
+
+```{r echo = F, results=F}
+# # BMR of 0 counts, 
+# Y <- compositions::clr(zCompositions::cmultRepl(kaijured[20:dim(kaijured)[2]], method="CZM", output="prop", z.warning = 0.999))
+# PERM_CLR_EU <- adonis(Y ~ phylum, data = kaijured, permutations=1000, method = "euclidean")
+# PERM_CLR_EU
+# 
+# # AIC = 926,17 phyl X hab 
+# # AIC = 924,76 phyl
+# 
+# PERM_BC$aov.tab
+# AICc.PERMANOVA(PERM_BC)$AIC
+# PERM_CLR_EU$aov.tab
+# AICc.PERMANOVA(PERM_CLR_EU)$AIC
+# 
+# bcdist <- vegdist(kaijured[20:dim(kaijured)[2]], method = "bray")
+# bcdistrel <- vegdist(relabunred, method = "bray")
+# 
+# eudist <- vegdist(Y, method = "euclidean")
+# par(mfrow = c(1,2))
+#   
+# plot(betadisper(eudist, grouping$phylum, bias.adjust = F), hull = F, ellipse = T, label = F, 
+#      col = rainbow(9), pch = c(0:4,15:18))
+# plot(betadisper(eudist, grouping$phylum), hull = F, ellipse = T, label = F, col = c25[c(1:7,24,17)], pch = c(0:4,15:18))
+# anova(betadisper(eudist, kaijured$phylum))
+# plot(betadisper(eudist, grouping$habitat), hull = F, ellipse = T, label = F, col = rainbow(4))
+# plot(betadisper(bcdist, grouping$habitat), hull = F, ellipse = T, label = F, col = rainbow(4))
+# 
+# legend("bottomright", legend = levels(grouping$phylum), col = viridis_pal()(9), pch = c(1:7,24,17))
+# # plot(betadisper(dist, grouping$phylum), hull = F, ellipse = T, label = F, col = rainbow(9)[grouping$phylum])
+# # legend("bottomleft", )
+# # o <- betadisper(dist, kaijured$phylum)
+# # plot(o$centroids, type = "n")
+# # text(x = o$centroids[,1], y = o$centroids[,2], labels = rownames(o$centroids))
+# 
+# 
+# 
+# #### AYUDITA https://www.researchgate.net/post/How_should_I_correctly_manage_PERMANOVA_for_factors_with_interactions
+```
+
+
+#### Compositional PCA {#kaijusample50}
+
+While it has been seen that invertebrate phylum and habitat factors appear to drive differences in the composition of viromes estimated by Kaiju taxonomic classification, it is still unclear which viral families are mainly responsible for this from previous analyses. Preserving the reduced dataset from the previous section, subcompositions of 46 parts were obtained after excluding rare viral families both in occurrence and relative abundance. The frequency of zero values in the resulting matrix was reduced to approximately $50\%$. Remaining zero values were replaced and *clr* transformation was performed over the imputed dataset. The first two principal components (PC) after SVD were able to summarize around $32\%$ of the variance between subcompositions. In the scores plot (Figure \@ref(fig:sample50biases), most observations are grouped relatively near 0 for PC2 and spread across the first PC. However, an outlying group is found in extremely negative values for PC2. These observations have either a very low library size or result from DNA-Sequencing experiments, which was not controlled when sampling these SRA accessions.
+
+After filtering out observations with these potential sources of bias, the dimensionality reduction in the parts, sparsity treatment and transformation process was repeated for the remaining dataset of 79 rows. This time, PC1 and PC2 together explained nearly $36\%$ of the variance in the *clr* coefficients matrix. As for the scores, a similar pattern to that identified for PCoA can be identified: viromes of nematodes are most distant to those of cnidarians, while arthropods and annelids still form a group with a relatively moderate within-group dispersion, although more near to cnidarians (Figure \@ref(fig:sample50pcakaiju). Platyhelminths are notably dispersed, except for six clustered observations that belong to the same species (*Dugesia japonica*). 
+
+With respect to loadings, *Reoviridae* and *Asfarviridae* have a prominent influence on PC1 and PC2, respectively. The host range of both families include invertebrates. Abundance of *Reoviridae* (dsRNA viruses) sequences seems to be highly variable between the samples, ranging from $0$ to $96\%$ in abundance relative to the whole virome. In the cnidarian samples located in the negative end of PC1, relative abundance of *Reoviridae* sequences is extremely high, suggesting an ongoing infectious state, whether if its host is the cnidarian itself or not. Although *Asfarviridae* is a relatively rare family only found in $37\%$ of the observations in the final dataset and with a maximum relative abundance of $0.02\%$, it is able to explain a notable amount of variation for PC2. This family of dsDNA viruses reported to infect invertebrates (arthropods) is almost always absent from cnidarians and consistently found among nematode samples. 
+
+Other influential dsDNA virus families include *Ascoviridae*, *Nimaviridae*, *Alloherpesviridae* and *Adenoviridae*. Of those, *Ascoviridae* (insects) and *Nimaviridae* (aquatic arthropods) are known to infect invertebrates. *Alloherpesviridae* is a family of viruses of fishes and amphibians which seems to be specially dominant in the group of cnidarians with lowest *Reoviridae* relative abundance. *Rhabdoviridae* family harbors ssRNA viruses with a remarkably wide host range among eukaryotes, including invertebrates such as arthropods and nematodes. In fact, rhabdoviruses are only found in arthropods and nematodes in a relative abundance higher than $0.01\%$ in this dataset. However, plant and vertebrate rhabdoviruses could also contribute to this abundance, since arthropods and nematodes frequently form tight ecological relationships with these organisms.
+
+Among these families, there is an overall higher presence of DNA viruses. Furthermore, there is a large difference in the known diversity of these families. For instance, while only one virus of *Nimaviridae* is known, tens or hundreds of viruses of *Adenoviridae*, *Reoviridae* and *Rhabdoviridae* are identified.
+
+The main strength of Kaiju taxonomic classification is the speed at which the results are obtained without a previous assembly step. Although there is a large amount of within-group dispersion that hinders a clear separation of groups, still most of the highly influential families in the PCA harbor viruses that potentially infect invertebrates, further validating our results. Also, the variations between observations were not necessarily driven by the most consistently abundant families mentioned at the beginning, but also some families of low relative abundance. Besides, library size, library source and single species overrepresentation have been identified as potential sources of bias.
+
+```{=latex}
+\begin{figure}[!htbp]
+```
+```{r sample50pcakaiju, echo = F, results = F, fig.height=7}
+# # null observations and E. diaphana excess already treated
+# # exclude families with 1 non-zero cell
+comp.mat <- kaijured[,20:dim(kaijured)[2]]
+comp.matred <- comp.mat[, which(apply(comp.mat, 2, function(x) length(which(x != 0))) > 1)]
+# exclude families with maximum relative frequency lower than 0.0001
+comp.matred <- comp.matred[,which(apply(comp.matred / apply(comp.matred, 1, sum), 2, max) > 0.0001)]
+# kaiju.imputed <- zCompositions::cmultRepl(comp.matred, method="CZM", output="prop", z.warning = 0.999)
+# Y <- compositions::clr(kaiju.imputed)
+# abundPC <- prcomp(x = Y, scale = F)
+# 
+cols <- rainbow(9)
+# 
+# plot(abundPC$x[,1], abundPC$x[,2], pch = as.numeric(kaijured$habitat) + 20,
+#      col = cols[as.numeric(kaijured$phylum)], bg = "grey90",
+#      xlab = paste("PC1(",round(pc1,3),")", collapse = ""), 
+#      ylab = paste("PC2(",round(pc2,3),")", collapse = ""), main = "Scores plot for Kaiju results (Pilot)")
+# legend("bottomright", legend = levels(kaijured$habitat), pch = 20 + (1:4),
+#        cex = 0.8, title = "Habitat")
+# legend("bottomleft", legend = levels(kaijured$phylum), pch = 22,
+#        col = cols, cex = 0.8, title = "Invertebrate phylum")
+# abline(h = 0, lty = 2)
+# abline(v = 0, lty = 2)
+# legend("topright", legend = c("Genomic library source", "Library size < 2 Gbases"), pch = 1,
+#        col = c("blue", "red"))
+# for (i in 1:length(colnames(comp.matred))){
+#   if ((i %in% which(abs(abundPC$rotation[,1]) > 0.2)) |  (i %in% which(abs(abundPC$rotation[,2]) > 0.2))){
+#     shape::Arrows(x0 = 0, y0 = 0, x1 = abundPC$rotation[i,1] * 10, y1 = abundPC$rotation[i,2] * 10, arr.width = 0.1, code = 2)
+#     if (abundPC$rotation[i,2] > 0) text(x = abundPC$rotation[i,1] * 10, y = abundPC$rotation[i,2]*10 + 0.4,labels = colnames(comp.matred)[i], cex = 0.8)
+#     else text(x = abundPC$rotation[i,1]*15, y = abundPC$rotation[i,2]*10 - 0.4,labels = colnames(comp.matred)[i], cex = 0.8)
+#   }
+# }
+# points(abundPC$x[which(kaijured$libsource == "GENOMIC"),1], abundPC$x[which(kaijured$libsource == "GENOMIC"),2], col = "blue", cex = 1.8)
+# points(abundPC$x[which(kaijured$bases < 2),1], abundPC$x[which(kaijured$bases < 2),2], col = "red", cex = 1.8)
+
+
+#### purge observations with sources of bias (repeating the process of sparsity treatment and clr transformation)
+kaiju_unbias <- dplyr::filter(as.data.frame(cbind(kaijured[,1:19], comp.matred)), bases > 2, libsource != "GENOMIC")
+to_impute <- kaiju_unbias[,20:dim(kaiju_unbias)[2]][, which(apply(kaiju_unbias[,20:dim(kaiju_unbias)[2]], 2, function(x) length(which(x != 0))) > 1)]
+to_impute <- to_impute[,which(apply(to_impute / apply(to_impute, 1, sum), 2, max) > 0.0001)]
+kaiju.imputed <- zCompositions::cmultRepl(to_impute, method="CZM", output="prop", z.warning = 0.999)
+Y <- compositions::clr(kaiju.imputed)
+abundPC2 <- prcomp(x = Y, scale = F)
+# screeplot(abundPC2, type = "barplot", main="Figure 1. Scree plot")
+(pc1 <- abundPC2$sdev[1]^2/sum(abundPC2$sdev^2))
+(pc2 <- abundPC2$sdev[2]^2/sum(abundPC2$sdev^2))
+plot(abundPC2$x[,1], abundPC2$x[,2], pch = as.numeric(kaiju_unbias$habitat) + 20,
+     col = cols[as.numeric(kaiju_unbias$phylum)], bg = "grey90",
+     xlab = paste("PC1(",round(pc1,4)*100,"%)", collapse = ""), 
+     ylab = paste("PC2(",round(pc2,4)*100,"%)", collapse = ""), las = 1)
+legend("bottomright", legend = levels(kaiju_unbias$habitat), pch = 20 + (1:4),
+       cex = 0.8, title = "Habitat")
+legend("bottomleft", legend = sort(unique(kaiju_unbias$phylum)), pch = 22,
+       col = cols[sort(unique(as.numeric(kaiju_unbias$phylum)))], cex = 0.8, title = "Invertebrate phylum")
+abline(v = 0, h = 0, lty = 2, col = "grey60")
+
+
+for (i in 1:length(colnames(to_impute))){
+  if ((i %in% which(abs(abundPC2$rotation[,1]) > 0.2)) |  (i %in% which(abs(abundPC2$rotation[,2]) > 0.2))){
+    shape::Arrows(x0 = 0, y0 = 0, x1 = abundPC2$rotation[i,1] * 8, y1 = abundPC2$rotation[i,2] * 8, arr.width = 0.1, code = 2, col = "grey60")
+    if (colnames(to_impute)[i] == "Nimaviridae") {
+      text(x = abundPC2$rotation[i,1] * 10, y = abundPC2$rotation[i,2]*8 + 0.9,labels = colnames(to_impute)[i], cex = 0.8)
+      next
+    }
+    if (abundPC2$rotation[i,2] > 0) text(x = abundPC2$rotation[i,1] * 10, y = abundPC2$rotation[i,2]*8 + 0.4,labels = colnames(to_impute)[i], cex = 0.8)
+    else text(x = abundPC2$rotation[i,1]*8, y = abundPC2$rotation[i,2]*8 - 0.4,labels = colnames(to_impute)[i], cex = 0.8)
+  }
+}
+```
+```{=latex}
+\caption{Biplot for Kaiju PCA results (Pilot).\label{fig:sample50pcakaiju}}
+Samples with a lower amount of sequenced positions than 2 Gb and 'GENOMIC' library source were excluded from this PCA analysis. Porifera and Brachiopoda phyla were lost in this subset of the data. Furthermore, three of the $46$ viral families were left with only zero values and had to be removed. For the purpose of visualization, loadings vectors were rescaled up to a constant factor and the values on the axes do not correspond with their real values. Only the loadings of the most influential viral families, i.e. with a loadings value higher than $0.2$ in absolute value either for PC1 or PC2, are displayed.
+\end{figure}
+```
+
+### DIAMOND
+
+#### Description and univariate analysis of diversity {#e90n50pilot}
+
+As a first comment for all contig-related pipelines, the average E90N50 statistic among the assemblies was 1368 bp, which indicates that half of $90\%$ of the most abundant transcripts are covered by contigs shorter than this value. As for dispersion, central $50\%$ of calculated E90N50 were in the range between 924 bp and 1791 bp ($IQR = 867$). The estimated E90N50 values for other Trinity *de novo* assembled transcriptomes of invertebrates in the literature (2125-2400 bp for terrestrial arthropods [@Li2022; @Oppenheim2018], 1346-3241 bp for marine cnidarians [@Ashwood2021], 1042-1943 for marine bryozoans [@Treibergs2020]) are usually higher than in most of our assemblies. There seems to be a positive yet very slight correlation between library size and E90N50 ($P < 0.05$, $R^2=0.07$), but this is not enough to explain the overall low values for E90N50. E90N50 statistic also seems to be notably variable depending on the tissue that is sampled and sequenced [@Treibergs2020]. However, most of the observed E90N50 values are still acceptable, since contigs of a few hundred bp are able to summarize the information of several reads. Also, the number of transcripts that account for $90\%$ of expression within the assembled transcriptomes appears to be highly variable, ranging from just around 5.500 different transcripts to more than 240.000 and with median around 31.000. Apart from the sheer number of unique transcripts, this is also affected by the degree of balance between the expression of the different genes within each sample.
+
+```{r echo = F, results = F}
+# merge family abundance matrix and general dataframe
+dmnd <- read.csv(file = "data/sample50/diamond_def_tpm.csv")
+dmnd <- cbind(dplyr::filter(df, run %in% dmnd$accession)[order(dplyr::filter(df, run %in% dmnd$accession)$run),], dmnd[order(dmnd$accession),5:dim(dmnd)[2]])
+
+dmnd$bases <- dmnd$bases / 1e9
+dmnd$phylum <- factor(dmnd$phylum)
+dmnd$habitat <- factor(dmnd$habitat)
+levels(dmnd$phylum) <- c("ANN", "ART", "CNI")
+# families in alphabetical order
+dmnd <- as.data.frame(cbind(dmnd[,1:19], dmnd[,20:dim(dmnd)[2]][,order(colnames(dmnd[,20:dim(dmnd)[2]]))]))
+
+# load E90N50 values (not for all accessions)
+qual <- read.delim("data/sample50/N50_sample50_pau.txt", header = F)
+allqual <- cbind(qual, dplyr::filter(df, run %in% qual$V1)$run, dplyr::filter(df, run %in% qual$V1)$bases/1e9, dplyr::filter(df, run %in% qual$V1)$phylum)
+qual <- cbind(dplyr::filter(qual, V1 %in% dmnd$run)[order(dplyr::filter(qual, V1 %in% dmnd$run)$V1),],
+dplyr::filter(dmnd, run %in% qual$V1)[order(dplyr::filter(dmnd, run %in% qual$V1)$run),][,c(2,19)])
+summary(lm(V3 ~ `dplyr::filter(df, run %in% qual$V1)$bases/1e+09`, data = allqual))
+#by(allqual$V3, allqual$`dplyr::filter(df, run %in% qual$V1)$phylum`, mean)
+mean(allqual$V3)
+quantile(allqual$V3, probs = c(0.25,0.75))
+summary(allqual$V4)
+
+
+```
+
+After running taxonomic classification of contigs with DIAMOND, no significant viral hits were found for two samples of Annelida and Cnidaria ($1.25$ and $3.36$ Gb, respectively). For the 23 remaining non-null observations of 16 invertebrate species, the estimated concentration of viral transcripts with respect to the whole transcriptome is in the range of $0.02\%$ to $0.7\%$ with median of $0.07\%$. 67 different viral families were identified in total, with an average $\alpha$-diversity of 17 families per non-null accession. Estimated $\alpha$-diversity seems to be similar both in location and dispersion to that determined with Kaiju results after filtering out null observations and observations with low sequencing depth and genomic library source (79 observations $\times$ 46 families): while for DIAMOND a range between 8 and 34 is observed with an $IQR = 19 - 15$, estimated $\alpha$-diversity indices had an average of 15 families ranging from 10 to 31 and with $IQR = 17 - 13$ for Kaiju. Furthermore, the distribution for $\alpha$-diversity is relatively homogeneous across all three phyla examined with DIAMOND. Alternatively, estimated Shannon diversity indices were not significantly different between phyla ($P > 0.05$) and were distributed mainly between $1.5$ and $2$, which is consistent with Kaiju results.
+
+Regarding the identified families and their relative abundances in the compositions, now the most abundant category is that of unclassified viruses with an average $19\%$ of viral transcripts among the samples. Next, sequences of *Adintoviridae*, which were not a specially abundant family under Kaiju results, are found in an average relative abundance of $16.8\%$. Adintoviruses are a group of animal dsDNA viruses related to adenoviruses and baculoviruses that are able to undergo integration into the host genome [@Starrett2021]. dsDNA virus families dominate the dataset in terms of abundance: the most abundant RNA virus family (*Iflaviridae*, a family of insect-infecting viruses, with $4.4\%$ of viral transcripts) is surpassed by six dsDNA virus families, including viruses of protists (*Mimiviridae*, $11.5\%$; *Phycodnaviridae*, $6.1\%$), viruses of animals (*Poxviridae*, $6.4\%$; *Iridoviridae*, $5.7\%$) and bacteriophages (*Myoviridae*, $4.8\%$). 20 viral families are found just in one of the samples, while 11 are found at least in half of the virome compositions, including an ubiquitous presence of unclassified viruses and adintoviruses. With regards to the overall sparsity in the compositional matrix, $74\%$ of its entries are zero values.
+
+```{r echo = F, results = F}
+summary(apply(dmnd[,20:dim(dmnd)[2]], 1, sum)/10000) # tpm to percentage
+dmnd[which(apply(dmnd[,20:dim(dmnd)[2]], 1, sum) == 0),] # null obs
+adiv <- apply(dmnd[which(apply(dmnd[,20:dim(dmnd)[2]], 1, sum) > 0),20:dim(dmnd)[2]], 1,
+              function(x) length(which(x > 0)))# n fam for each non-zero obs
+summary(adiv)
+apply(dmnd[,20:dim(dmnd)[2]], 1, diff_fams)
+# boxplot(apply(dmnd[,20:dim(dmnd)[2]], 1, shannon) ~ dmnd$phylum)
+
+
+# Shannon
+summary(apply(dmnd[which(apply(dmnd[,20:dim(dmnd)[2]], 1, sum) > 0),20:dim(dmnd)[2]], 1, shannon))
+# boxplot(apply(dmnd[which(apply(dmnd[,20:dim(dmnd)[2]], 1, sum) > 0),20:dim(dmnd)[2]], 1, shannon) ~ dmnd$phylum[which(apply(dmnd[,20:dim(dmnd)[2]], 1, sum) > 0)])
+# anova H' ~ phylum
+summary(aov(apply(dmnd[which(apply(dmnd[,20:dim(dmnd)[2]], 1, sum) > 0),20:dim(dmnd)[2]], 1, shannon) ~ dmnd$phylum[which(apply(dmnd[,20:dim(dmnd)[2]], 1, sum) > 0)]))
+
+dmndred <- dmnd[which(apply(dmnd[,20:dim(dmnd)[2]], 1, sum) > 0),]
+
+reldmnd <- t(apply(dmndred[,20:dim(dmndred)[2]], 1, function(x) x/sum(x)))
+# most abundant families (average)
+sort(round(apply(reldmnd, 2, mean), 4)* 100)
+
+# non-zero occurrences per family
+sort(apply(reldmnd, 2, function(x) length((which(x > 0)))))
+
+# overall sparsity
+mean(dmndred[,20:dim(dmndred)[2]] == 0)
+
+
+```
+
+
+#### PERMANOVA {#permapilot}
+
+Since in this case the interaction between phylum and habitat yields three categories, there is only the option to perform one-way PERMANOVA tests. Both possible models show significant association ($P < 0.05$) of phylum and habitat factors to any differences in location or dispersion among the groups. However, phylum model is able to explain $30.5\%$ of the variance in the $BC$ matrix while habitat model only reached an $R^2$ of $17.5\%$. The superior fit of the phylum model can also be seen from its inferior AIC ($40.6$ vs. $42.6$). PERMDISP test showed evidence for the rejection of the homogeneity of within-group dispersion among groups hypothesis ($P < 0.05$), suggesting that it is unclear if the rejection of $H_0$ in PERMANOVA is due to true location differences between groups. As a means of comparison, PERMANOVA and PERMDISP analyses were also performed over the Aitchison distances matrix after replacement of zeros, resulting in the same combination of hypotheses testing decisions. Again, variance explained by phylum factor was approximately $30\%$.
+
+Aiming to visualize the location and dispersion within and between phyla for both cases, representation of the two first principal coordinates was performed (Figure \@ref(fig:sample50pcoadiamond). It seems that for both matrices, but especially for the Aitchison distances matrix, PCo1 and PCo2 capture a difference in central locations among phyla. Therefore, average virome compositions apparently differ between phyla and habitats for this very reduced dataset. The heterogeneity of variances is also clearly visible, especially between cnidarians and the rest of groups. The low within-group variation recorded for cnidarians might be a sampling artifact due to the presence of only two species, with one of them carrying four out of five observations. Using the Aitchison distances, the observed range of PCo1 and PCo2 shows no overlap between groups. Such is the resolution in the segregation of groups that a simple clustering algorithm like $k$-means fully reconstructs habitat division with $k = 2$ (annelids grouped with arthropods). With $k = 3$, clusters reproduce the original phylum division, except for an arthropod observation that groups with annelids. In conclusion, Aitchison distances have shown significant practical advantages in this case, apart from its theoretical superiority in the study of dissimilarities between compositions.
+
+```{=latex}
+\begin{figure}[!htbp]
+```
+```{r echo = F, results = F, fig.width=8}
+par(mfrow = c(1,2))
+par(mar=c(4,4,4,2)+0.1)
+par(cex.main = 1)
+library(vegan)
+PERM_BC_phyl <- vegan::adonis(dmndred[,20:dim(dmndred)[2]] ~ phylum, data = dmndred, permutations=1000, method = "bray")
+PERM_BC_phyl$aov.tab
+AIC.PERMANOVA(PERM_BC_phyl)$AIC
+# PERM_BC_hab <- vegan::adonis(dmndred[,20:dim(dmndred)[2]] ~ habitat, data = dmndred, permutations=1000, method = "bray")
+# PERM_BC_hab$aov.tab
+# AIC.PERMANOVA(PERM_BC_hab)$AIC
+
+bcdist <- vegdist(dmndred[,20:dim(dmndred)[2]], method = "bray")
+PERMDISP_BC <- betadisper(bcdist, dmndred$phylum, type = "centroid")
+anova(betadisper(bcdist, dmndred$phylum))
+plot(betadisper(bcdist, dmndred$phylum), label = F,
+     xlab = paste("PCo1 (", round(100*abs(PERMDISP_BC$eig[1]) /
+                                                      sum(abs(PERMDISP_BC$eig)), 2), "%)"),
+     ylab = paste("PCo2 (", round(100*abs(PERMDISP_BC$eig[2]) /
+                                                      sum(abs(PERMDISP_BC$eig)), 2), "%)"),
+     main = "A                                                     ", las = 1,
+     cex = 1.1, lwd = 1.75, col = rainbow(9)[c(1,2,4)])
+
+legend("bottomright", legend = c("ANN","ART","CNI"), pch = 1:3, col = rainbow(9)[c(1,2,4)])
+abline(v = 0, h = 0, lty = 2, col = "grey60")
+
+# 0.001 tpm detection threshold for multrepl
+dmndimp <- zCompositions::multRepl(dmndred[,20:dim(dmndred)[2]], label = 0, dl = rep(0.001, dim(dmndred[,20:dim(dmndred)[2]])[2]), z.warning = 0.99)
+dmndclr <- compositions::clr(dmndimp)
+Adist <- vegdist(dmndclr, method = "euclidean")
+PERM_AD_phyl <- vegan::adonis(dmndclr ~ phylum, data = dmndred, permutations=1000, method = "euclidean")
+PERM_AD_phyl$aov.tab
+
+
+PERMDISP_AD <- betadisper(Adist, dmndred$phylum, type = "centroid")
+
+
+anova(betadisper(Adist, dmndred$phylum))
+plot(betadisper(Adist, dmndred$phylum), label = F, 
+     xlab = paste("PCo1 (", round(100*abs(PERMDISP_AD$eig[1]) /
+                                                      sum(abs(PERMDISP_AD$eig)), 2), "%)"),
+     ylab = paste("PCo2 (", round(100*abs(PERMDISP_AD$eig[2]) /
+                                                      sum(abs(PERMDISP_AD$eig)), 2), "%)"),
+     main = "B                                                      ", las = 1,
+     cex = 1.1, lwd = 1.75, col = rainbow(9)[c(1,2,4)])
+legend("bottomright", legend = c("ANN","ART","CNI"), pch = 1:3, col = rainbow(9)[c(1,2,4)])
+abline(v = 0, h = 0, lty = 2, col = "grey60")
+
+table(kmeans(PERMDISP_AD$vectors[,1:2], centers = 2, nstart = 50)$cluster, dmndred$habitat)
+table(kmeans(PERMDISP_AD$vectors[,1:2], centers = 3, nstart = 60)$cluster, dmndred$phylum)
+
+obj <- c()
+for (i in 1:10) {
+  a <- kmeans(PERMDISP_AD$vectors[,1:2], centers = i, nstart = 50)
+  obj[i] <- a$tot.withinss/a$totss
+}
+obj # no suggestion about a particularly reasonable number of centers
+
+```
+```{=latex}
+\caption{Principal Coordinate Analyses for DIAMOND results (Pilot).\label{fig:sample50pcoadiamond}}
+PCoA was performed over the Bray-Curtis dissimilarities matrix (\textbf{A}) and the Aitchison distances matrix (\textbf{B}) for the 23 non-null compositions obtained from DIAMOND taxonomic classification of contigs. Observations are connected to the median of their phylum with grey segments. The convex hull is displayed for each phylum to show the range of the observed individuals of each phylum in the space of PCo1 and PCo2. Convex hulls show no overlap between phyla in the case of using Aitchison distances, resulting in a segregation of groups of high resolution. In both cases, PCo1 accounts for most of the differences between phyla and, especially, between habitats.
+
+\end{figure}
+```
+
+#### Compositional PCA
+
+PCA was performed over the same *clr* coefficients matrix used for PCoA analysis with Aitchison distances. Accordingly, the distribution of scores in the bidimensional space of the two first PCs is very similar to that observed in the previous section. It is worth mentioning that, in this case, no exclusion of rare families was made before non-parametric replacement of cells with tpm $< 0.001$, ergo all zeros are assumed to be sampling zeros. Roughly $34\%$ of the variance was explained by PC1 ($22.5\%$) and PC2 ($11.5\%$). Different phyla are mainly separated by PC1, which also captures the habitat division (Figure \@ref(fig:sample50pcadiamond)). PC2 helps in the separation of annelids and arthropods, which share terrestrial habitat. Therefore, viral families that contribute the most to PC1 are responsible for the habitat division of viromes, while the phylum division requires the interpretation of most influential families to both PC1 and PC2. Also, PC3($9.4\%$) was seen not to segregate phyla, but to capture a great amount of within-group dispersion, especially for arthropods, similarly to PC2.
+
+As to the loadings vectors, the most influential families are relatively balanced in terms of effect to PC1 and PC2, i.e. there is not a single family with a loadings vector much higher in norm than the rest. It can be concluded that the viromes of cnidarians are rich in DNA viruses of archaea, bacteria (*Microviridae*, *Podoviridae*) and protozoa (*Marseilleviridae*, *Pithoviridae*) with respect to the the viromes of annelids and arthropods. Also, the relative abundance of ascoviruses, which are dsDNA viruses of insects, appears to be greater in cnidarians than in arthropods or annelids. This could respond to the presence of non-described viruses related to *Ascoviridae* in cnidarian samples. Viromes of arthropods seem to be particularly rich in ssRNA virus families of eukaryotes, such as *Dicistroviridae*, *Iflaviridae* and *Rhabdoviridae*. The first two of these families are related to each other and only known to infect arthropods. Nevertheless, sequences of *Parvoviridae*, which is a family of DNA viruses of animals, including diverse invertebrates, also seem to be specially frequent in arthropods. Families found in differentially greater proportion in annelids are more diverse, including dsDNA bacteriophages (*Siphoviridae*), retroviruses and viruses of arthropods (*Baculoviridae*, *Polydnaviridae* and *Nairoviridae*). It remains unknown if any member of these three families are able to infect annelids or their detection has just been a consequence of the tight ecological relationship of annelids with soil-inhabiting arthropods, including eggs and larvae of many insects.
+
+In conclusion, we note that the viral families associated with a group of invertebrates tend to be either: *(i)* able to infect members of said invertebrate group or *(ii)* part of the virome of microbes found when sampling said invertebrates. This implies both a host taxonomic effect that is summarized here by phylum factor and a habitat effect. Again, it is important to mention that identified sequences do not necessarily belong to replicative viruses, but could result from EVE expression. While it is true that a very reduced dataset was used with DIAMOND, within-group distances are moderate for phylum and habitat groupings and make possible cluster partitioning, in contrast to Kaiju results. With DIAMOND, the interpretation of the results seems to be relatively coherent with the recognized host range of the viral families.
+
+
+
+```{=latex}
+\begin{figure}[!htbp]
+```
+```{r fig.height=6, echo = F, results = F}
+abundPC3 <- prcomp(x = dmndclr, scale = F)
+(pc1 <- abundPC3$sdev[1]^2/sum(abundPC3$sdev^2))
+(pc2 <- abundPC3$sdev[2]^2/sum(abundPC3$sdev^2))
+plot(abundPC3$x[,1], abundPC3$x[,2], pch = as.numeric(dmndred$habitat) + 22,
+     col = cols[as.numeric(dmndred$phylum)], bg = "grey90",
+     xlab = paste("PC1(",round(pc1,4)*100,"%)", collapse = ""), 
+     ylab = paste("PC2(",round(pc2,4)*100,"%)", collapse = ""), las = 1, cex = 1.4)
+legend("topright", legend = levels(dmndred$habitat), pch = 22 + (1:4),
+       cex = 0.8, title = "Habitat")
+legend("bottomright", legend = sort(unique(dmndred$phylum)), pch = 22,
+       col = cols[sort(unique(as.numeric(dmndred$phylum)))], cex = 0.8, title = "Invertebrate phylum")
+abline(v = 0, h = 0, lty = 2, col = "grey60")
+
+# positions of arrows and viral families names
+for (i in 1:length(colnames(dmndred[,20:dim(dmndred)[2]]))){
+  if ((i %in% which(abs(abundPC3$rotation[,1]) > 0.2)) |  (i %in% which(abs(abundPC3$rotation[,2]) > 0.2))){
+    shape::Arrows(x0 = 0, y0 = 0, x1 = abundPC3$rotation[i,1] * 30, y1 = abundPC3$rotation[i,2] * 30, arr.width = 0.1, code = 2, col = "grey60")
+    if (colnames(dmndred[,20:dim(dmndred)[2]])[i] == "Podoviridae") {
+      text(x = abundPC3$rotation[i,1] * 30 + 1.8, y = abundPC3$rotation[i,2]*30 + 1.8,labels = colnames(dmndred[,20:dim(dmndred)[2]])[i], cex = 0.8)
+      next
+    }
+    if (colnames(dmndred[,20:dim(dmndred)[2]])[i] == "Baculoviridae") {
+      text(x = abundPC3$rotation[i,1] * 30 + 1.1, y = abundPC3$rotation[i,2]*30 - 1.8,labels = colnames(dmndred[,20:dim(dmndred)[2]])[i], cex = 0.8)
+      next
+    }
+    if (colnames(dmndred[,20:dim(dmndred)[2]])[i] == "Rhabdoviridae") {
+      text(x = abundPC3$rotation[i,1] * 30 - 0.2, y = abundPC3$rotation[i,2]*30 + 1.8,labels = colnames(dmndred[,20:dim(dmndred)[2]])[i], cex = 0.8)
+      next
+    }
+    if (abundPC3$rotation[i,2] > 0) text(x = abundPC3$rotation[i,1] * 30, y = abundPC3$rotation[i,2]*30 + 1.2,labels = colnames(dmndred[,20:dim(dmndred)[2]])[i], cex = 0.8)
+    else text(x = abundPC3$rotation[i,1]*30, y = abundPC3$rotation[i,2]*30 - 1.2,labels = colnames(dmndred[,20:dim(dmndred)[2]])[i], cex = 0.8)
+  }
+}
+
+```
+```{=latex}
+\caption{Biplot representation of PCA for DIAMOND results (Pilot).\label{fig:sample50pcadiamond}}
+PCA was performed over the 23 non-null compositions obtained after DIAMOND taxonomic classification transformed to $clr$ coefficients. The variance of the $clr$-transformed parts was not standardized prior to SVD. PC1 and PC2 explain roughly $20\%$ of the standard deviation for all 67 viral families identified with DIAMOND. Loadings vectors with any element in PC1 or PC2 higher than 0.2 in absolute value are represented along with their respective viral families names. 
+
+\end{figure}
+```
+
+### Comments on the rest of the contig analysis tools used
+
+#### VirFinder and VirSorter2
+
+Ideally, VirFinder and VirSorter2 should provide a preselection of putatively viral contigs, so that only contigs that are true positives in DIAMOND taxonomic classification are preserved. Additionally, these binary classifiers use variables other than sheer sequence similarity that could prevent the occurrence of false positives. 
+
+Using VirFinder, approximately $20\%$ of contigs were classified as viral ($FDR < 0.05$), which would only reduce DIAMOND's workload and runtime to a fifth. However, only 49 different viral families are identified for the 23 non-null observations, which translates to a loss of 18 viral families with respect to the DIAMOND analysis without the preselection step. These results might indicate that some true viral sequences present in the sample are lost in VirFinder step or that VirFinder excludes non-viral contigs that are classified as viral by DIAMOND. An anomalous behavior was observed in the distribution of $p$-values obtained through VirFinder classification of contigs: $p$-values (and $FDR$) showed a tendency to oscillate around the significance threshold as the contig length increased (Figure \@ref(fig:vfpvals)). Assuming that two populations of contigs coexist within the whole, i.e. those viral and those non-viral, it would be expected that the distribution of $p$-values for the non-viral contigs would be uniform [0,1]. However, as the contig length increases, the range of observed $p$-values contracts more and more around $FDR \sim 0.05$, while longer sequences carry more information to accept or reject the hypothesis of viralness ($H_1$). Apart from this, the resolution in the segregation of groups in PCA has decreased significantly with respect to DIAMOND classification alone (Figure \@ref(fig:sample50pcavfvs2) A). Therefore, contigs of viral families that drive phylum and habitat differences between observations have been classified as non-viral by VirFinder model, overall increasing the within-group dispersions.
+
+In contrast, VirSorter2 just roughly classifies $0.07\%$ of contigs as viral. As a result, only 29 different viral families are found and three more samples become null observations. While a high proportion of those sequences are then classified into viral families by DIAMOND, this step greatly reduces the total number of viral contigs after the pipeline. However, it is able to capture the differential information of each group and approximately reproduce what has been seen in the DIAMOND analysis, where generally the same viral families influence the segregation of the data in similar ways (Figure \@ref(fig:sample50pcavfvs2) B). Also, the overall abundance of viruses with uncertain family assignation increases to approximately $47\%$ of all viral transcripts after using the VirSorter2 pipeline. In summary, VirSorter2 seems to be less problematic than VirFinder, although neither of these models has been intensively trained with invertebrate datasets.
+
+
+#### CAT
+
+Out of 131 transcriptome assemblies, CAT was able to annotate at least one contig as viral for only 95 samples. Overall, contigs of 54 different viral families were recorded at least once, which reflect a lower diversity compared to Kaiju or DIAMOND. An exceptionally high presence of zeros in the compositional matrix was observed: $93.5\%$ before excluding null observations and $92.2\%$ afterwards. However, after filtering out problematic observations with low library size and non-transcriptomic library source as in \@ref(kaijusample50), more meaningful results are obtained with reference to Kaiju (Figure \@ref(fig:sample50pcacat) A), although only 70 observations and 49 families remain in a matrix with $89\%$ of zeros. Viromes are apparently divided by habitat in PC1, with arthropods and nematodes being the most distant from cnidarians and aquatic platyhelminths, while annelids lie spread out in between. PC2 appears to originate phylum divisions within the terrestrial (negative quadrants of PC1) and aquatic (positive quadrants of PC1) groupings. As for the loadings, dsDNA viruses of microbes and animals seem to be more dominant in viromes of aquatic invertebrate samples, while RNA viruses of animals are more prevalent in terrestrial samples. In general, the accuracy of the results seems notably superior to Kaiju's and comparable to that seen for DIAMOND blastx-related pipelines. It remains unknown if the recorded loss of diversity of CAT results with respect to DIAMOND corresponds mostly to the occurrence of false positives using DIAMOND or false negatives using CAT.
+
+
+#### HMMER-CAT
+
+For this pipeline, contigs have to first show homology to the provided RdRp profiles and, then, to any viral sequence in the reference database used in CAT analysis. A very low number of hits, if any, were obtained for all contigs in \texttt{hmmsearch}. Only 12 observations had non-zero sum compositions and eight of them had more than one viral family present, generally two. Furthermore, only 14 viral families were found at least once. A compositional analysis of this dataset seems rather inappropriate for its extreme sparsity ($98.2\%$ of all cells). Apart from that, some of the identified contigs with ORFs homologous to RdRp were then assigned to DNA virus families by CAT, which is an undesirable behavior given that RdRp is a characteristic gene of RNA viruses. 
+
+
+```{r echo = F, results = F}
+tpm_hmmer <- read.csv("data/sample50/hmmer_def_tpm.csv", header = T)
+tpm_hmmer$phylum <- factor(tpm_hmmer$phylum)
+tpm_hmmer$species <- factor(tpm_hmmer$species)
+tpm_hmmer$accession <- factor(tpm_hmmer$accession)
+tpm_hmmer$habitat <- factor(tpm_hmmer$habitat)
+
+length(which(apply(tpm_hmmer[,5:18], 1, sum) > 0))
+1 - mean(tpm_hmmer[,5:18] > 0)
+# zCompositions::zPatterns(tpm_hmmer[,5:18], label = 0)
+```
+
+
+## Conclusions
+
+In this pilot test, five different pipelines for taxonomic classification of viruses into families have been compared in terms of time efficiency and results. Overall, Kaiju is the least computationally demanding taxonomic classifier tested. It performs the analysis quickly after the download and preprocessing step. However, its results show a greater amount of *noise*, i.e. information that does not seem to be related to phylum or habitat groupings, compared to DIAMOND-related pipelines, although establishing a more strict E-value threshold could help improve this situation. 
+
+Regarding the four remaining pipelines that use contigs as input, HMMER-CAT is the fastest, but also the least informative one, although a more thoughtful selection of profiles could enhance its results. CAT offers a great alternative to DIAMOND blastx in terms of runtime, since not all possible reading frames of contigs are analyzed, but just the ORFs predicted with Prodigal. VirFinder and VirSorter2 greatly differ in the proportion of predicted viral contigs, with VirFinder being far too unspecific in the classification. As a result, the runtimes of their pipelines are similar, with VirFinder being faster but not providing a very reduced subset of contigs and VirSorter2 being fairly slow by its own, although greatly reducing subsequent DIAMOND analysis workload. Taxonomic classification of all contigs with DIAMOND blastx represents the slowest pipeline and, arguably, the most sensitive of them all.
+
+Apart from this, several sources of bias that were not controlled when sampling the observations for this pilot test have been identified. Namely, the library size and the source of the library, i.e. the type of nucleic acids sequencing experiment that was applied, showed an effect on the characterized viromes. Samples with library sizes less than $4$ Gb tend to be associated with viromes with lower $\alpha$-diversity, which suggests an insufficient sequencing depth necessary to detect rare-occurring viruses in the transcriptomes. Also, another source of bias is related to the overrepresentation of single species or genera within phyla. The transcriptomes of samples with close taxonomic relationships are naturally similar, but also because they are frequently sampled by the same researchers using the same experimental conditions. For these two reasons, it is problematic to consider all observations of a phylum as independent members, regardless of their taxonomic affiliations below this rank. The ideal solution would be to include the whole phylogenetic dependence structure that connects not only the species within a phylum, but also phyla to each other, instead of the use of independent or nested factors for each considered taxonomic rank.
+
+As for the results, the use of Aitchison distances and Bray-Curtis dissimilarities was compared for PERMANOVA and PERMDISP tests and PCoA. Regardless of Aitchison distances showing more meaningful results, it has been recently argued that their application might be more appropriate for community composition studies than traditional Bray-Curtis dissimilarities, which are sensitive to scale effects. The families that differentiate the most observations of different phyla and habitats can be identified in the biplot representations of PCA. Other representations, such as heatmaps and barplots can be used to examine the relative abundances of each viral family in the observations or aggregations by group, although this will be reserved for the definitive analysis. 
+
+
+

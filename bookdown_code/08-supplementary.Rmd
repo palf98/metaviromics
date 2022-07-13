@@ -1,0 +1,922 @@
+# Supplementary
+
+
+```{r fqd-speed, echo = F}
+library(kableExtra)
+
+
+rates <- c(8.97, 1.02, 1.50, 1.77)
+names <- c("fastq-dump", "fasterq-dump (25 threads) + pigz (25 threads)",
+           "parallel-fastq-dump (--gzip; 25 threads)","parallel-fastq-dump (25 threads) + pigz (25 threads)")
+dffqd <- cbind(names, rates)
+
+knitr::kable(dffqd, col.names = c("Method", "min/GB of compressed fastq file"), row.names = F, format = "latex", align = "lc",
+       caption = "Comparison of the average download speed of different fastq download programs from SRA accessions.", booktabs = T) %>%
+  kable_styling(position = "center", latex_options = c("striped", "hold_position"))  %>%
+  add_footnote("Download methods were tested with a fixed set of 9 accessions. All fastq files were compressed to 
+           gzip compression level 6, adding up to 51 GB. The reported download rate was obtained by dividing
+           the sum of the size of fastq.gz files by the total elapsed time.", threeparttable = T, notation = "none")
+
+
+```
+
+
+
+```{r pipeline-speed, echo = F}
+
+dfpilotpipe <- data.frame(Programs = c("Trimmomatic", "Kaiju", "Trinity", "rnaviralSPAdes", "RSEM", "Kallisto", "VirFinder",
+                                    "VirSorter2", "DIAMOND", "CAT", "Prodigal (contigs)", "hmmsearch"),
+                          Threads = c(25, 20, 25, 16, 1, 15, 25, 20, 25, 20, 1, 1),
+                          Runtime = c("14 min", "12 min 37 s", "3 h", "14 min", "2 h 35 min", "4 min", "28 min",
+                                    "6 h 50 min", "31 h 52 min", "1 h 18 min", "8 min 10 s", "< 10 s"),
+                          Features = c("87\\% surviving paired reads", "1\\% of viral reads", rep("-", 4), 
+                                       "42\\% viral contigs", "0.3\\% viral contigs", "20\\% viral contigs", "-", "1.26 ORFs/contig", "0.02\\% viral ORFs"))
+
+library(kableExtra)
+
+dfpilotpipe$Programs[7] <- paste0("VirFinder", footnote_marker_alphabet(1))
+dfpilotpipe$Programs[9] <- paste0("DIAMOND", footnote_marker_alphabet(2))
+dfpilotpipe$Programs[12] <- paste0("hmmsearch", footnote_marker_alphabet(3))
+
+
+knitr::kable(dfpilotpipe, row.names = F, format = "latex",
+       caption = "Overview of methods used over example accession SRR11906528 of nemertean species Amphiporeus lactifloreus (7.03 Gb)", booktabs = T, escape = F) %>%
+  kable_styling(position = "center", latex_options = c("striped", "h!"))  %>%
+  column_spec(1, width="5cm") %>%
+  pack_rows("Read pre-processing", 1, 1) %>%
+  pack_rows("Taxonomic classification (reads)", 2, 2) %>%
+  pack_rows("De novo assembly", 3, 4) %>%
+  pack_rows("Transcript abundance", 5, 6) %>%
+  pack_rows("Viralness prediction", 7, 8) %>%
+  pack_rows("Taxonomic classification (contigs)", 9, 12) %>%
+  footnote(alphabet = c("An \\\\textit{ad hoc} R script was made to run VirFinder in parallel.", 
+                        "BLASTx run in very-sensitive mode.", 
+                        "Searching against 9 RdRp profiles."),
+           general = "Since the relation between time and file size or number of bases is not necessarily linear for all methods, the total elapsed runtime was reported instead of a size-corrected rate such as GB/h or Gb/h.",
+           threeparttable = T, escape = F)
+```
+
+
+```{=latex}
+\begin{figure}[!htbp]
+```
+```{r echo  = F, results= F, fig.height=7}
+kaiju <- read.csv(file = "data/sample50/absabun_merged_001.csv")
+
+df <- read.delim("data/db_def_con_DNA.tsv", header = T)
+kaiju <- cbind(dplyr::filter(df, run %in% kaiju$accession)[order(dplyr::filter(df, run %in% kaiju$accession)$run),], kaiju[order(kaiju$accession),6:82])
+kaiju$bases <- kaiju$bases / 1e9
+
+kaiju$phylum <- factor(kaiju$phylum)
+kaiju$habitat <- factor(kaiju$habitat)
+levels(kaiju$phylum) <- c("ANN", "ART", "BRA", "CNI", "NMD", "PLT", "POR", "ROT", "URO")
+
+comp.mat <- kaiju[,(which(colnames(kaiju) == "bases") + 1):dim(kaiju)[2]]
+kaijured <- rbind(kaiju[which(kaiju$species != "Exaiptasia diaphana"),], 
+                  kaiju[which(kaiju$run %in% c("SRR6202261", "SRR6202279", "SRR6202281")),])
+
+kaijured <- kaijured[, -which(apply(kaijured[,20:96], 2, sum) == 0)-19]
+# null observations and E. diaphana excess already treated
+# exclude families with 1 non-zero cell
+comp.mat <- kaijured[,20:dim(kaijured)[2]]
+comp.matred <- comp.mat[, which(apply(comp.mat, 2, function(x) length(which(x != 0))) > 1)]
+# exclude families with maximum relative frequency lower than 0.0001
+comp.matred <- comp.matred[,which(apply(comp.matred / apply(comp.matred, 1, sum), 2, max) > 0.0001)]
+kaiju.imputed <- zCompositions::cmultRepl(comp.matred, method="CZM", output="prop", z.warning = 0.999)
+Y <- compositions::clr(kaiju.imputed)
+abundPC <- prcomp(x = Y, scale = F)
+(pc1 <- abundPC$sdev[1]^2/sum(abundPC$sdev^2))
+(pc2 <- abundPC$sdev[2]^2/sum(abundPC$sdev^2))
+cols <- c(1:8, "burlywood4")
+
+plot(abundPC$x[,1], abundPC$x[,2], pch = as.numeric(kaijured$habitat) + 20,
+     col = cols[as.numeric(kaijured$phylum)], bg = "grey90",
+     xlab = paste("PC1(",round(pc1,3)*100,"%)", collapse = ""),
+     ylab = paste("PC2(",round(pc2,3)*100,"%)", collapse = ""))
+legend("bottomright", legend = levels(kaijured$habitat), pch = 20 + (1:4),
+       cex = 0.8, title = "Habitat")
+legend("bottomleft", legend = levels(kaijured$phylum), pch = 22,
+       col = cols, cex = 0.8, title = "Invertebrate phylum")
+abline(v = 0, h = 0, lty = 2, col = "grey60")
+
+legend("topright", legend = c("Genomic library source", "Library size < 2 Gbases"), pch = 1,
+       col = c("blue", "red"))
+# for (i in 1:length(colnames(comp.matred))){
+#   if ((i %in% which(abs(abundPC$rotation[,1]) > 0.2)) |  (i %in% which(abs(abundPC$rotation[,2]) > 0.2))){
+#     shape::Arrows(x0 = 0, y0 = 0, x1 = abundPC$rotation[i,1] * 10, y1 = abundPC$rotation[i,2] * 10, arr.width = 0.1, code = 2)
+#     if (abundPC$rotation[i,2] > 0) text(x = abundPC$rotation[i,1] * 10, y = abundPC$rotation[i,2]*10 + 0.4,labels = colnames(comp.matred)[i], cex = 0.8)
+#     else text(x = abundPC$rotation[i,1]*15, y = abundPC$rotation[i,2]*10 - 0.4,labels = colnames(comp.matred)[i], cex = 0.8)
+#   }
+# }
+points(abundPC$x[which(kaijured$libsource == "GENOMIC"),1], abundPC$x[which(kaijured$libsource == "GENOMIC"),2], col = "blue", cex = 1.8)
+points(abundPC$x[which(kaijured$bases < 2),1], abundPC$x[which(kaijured$bases < 2),2], col = "red", cex = 1.8)
+
+```
+```{=latex}
+\caption{Scores plot for Kaiju PCA results before removing bias sources (Pilot).\label{fig:sample50biases}}
+PC2 seems to separate a cluster of seven observations from the rest of the samples. These outlying observations have either a very low library size or a genomic rather than a transcriptomic library source, suggesting that both of these variables have a potentially notable effect on virome composition.
+\end{figure}
+```
+
+```{=latex}
+\begin{figure}[!htbp]
+```
+```{r echo = F, results = F, fig.height=4}
+VFpvals <- read.csv("data/sample50/VFpvals.csv")
+par(mfrow = c(1,2), mar = c(4,4,3,1))
+hist(VFpvals$fdr, breaks = 50, main = "A                                  ", las = 1,
+     ylab = "Absolute frequency", xlab = "FDR")
+abline(v = 0.05, lty = 2, col = "red", lwd = 2)
+plot(VFpvals$length, VFpvals$fdr, cex = 0.8, pch = 16, main = "B                                  ", las = 1,
+     ylab = "FDR", xlab = "Contig length (bp)")
+abline(h = 0.05, lty = 2, col = "red", lwd = 2)
+
+```
+```{=latex}
+\caption{Overview of the distribution of $p$-values obtained by VirFinder (Pilot).\label{fig:vfpvals}}
+$5000$ contig classification tests of seven accessions were randomly sampled to achieve an overview of the empirical distribution of their adjusted $p$-values ($FDR$). \textbf{A.} The histogram shows the predominance of small $FDR$ around the established significance threshold and the low proportion of $FDR$ in the upper half of their theoretical range. \textbf{B.} All observed $FDR$ near to 1 are observed for small contigs. As contig lengths increase, one could expect smaller $p$-values for true viral contigs and an uniform distribution [0,1] of $p$-values for non-viral contigs. 
+
+\end{figure}
+```
+
+```{=latex}
+\begin{figure}[!htbp]
+```
+```{r echo = F, results = F, fig.width = 9, fig.height = 6}
+par(mfrow = c(1,2), mar = c(4,4,3,2))
+#### VF ####
+tpm_vf <- read.csv("data/sample50/vf_fdr_def_tpm.csv", header = T)
+tpm_vf$phylum <- factor(tpm_vf$phylum)
+tpm_vf$species <- factor(tpm_vf$species)
+tpm_vf$accession <- factor(tpm_vf$accession)
+tpm_vf$habitat <- factor(tpm_vf$habitat)
+# filter null rows and null columns
+vfred <- tpm_vf[which(apply(tpm_vf[,5:dim(tpm_vf)[2]], 1, sum) > 0),
+                which(apply(tpm_vf[,5:dim(tpm_vf)[2]], 2, sum) > 0)]
+levels(vfred$phylum) <- c("ANN", "ART", "CNI")
+# sacamos la matriz de solo composiciones, X
+X <- vfred[,5:dim(vfred)[2]]
+Ximp <- zCompositions::multRepl(X, label = 0, dl = rep(0.001, dim(X)[2]), z.warning = 0.99)
+YVF <- compositions::clr(Ximp)
+cols <- rainbow(9)
+
+abundPC4 <- prcomp(x = YVF, scale = F)
+(pc1 <- abundPC4$sdev[1]/sum(abundPC4$sdev))
+(pc2 <- abundPC4$sdev[2]/sum(abundPC4$sdev))
+plot(abundPC4$x[,1], abundPC4$x[,2], pch = as.numeric(vfred$habitat) + 22,
+     col = cols[as.numeric(vfred$phylum)], bg = "grey90",
+     xlab = paste("PC1(",round(pc1,4)*100,"%)", collapse = ""), 
+     ylab = paste("PC2(",round(pc2,4)*100,"%)", collapse = ""), las = 1, cex = 1.4)
+legend("bottomleft", legend = levels(vfred$habitat), pch = 22 + (1:4),
+       cex = 0.8, title = "Habitat")
+legend("bottomright", legend = sort(unique(vfred$phylum)), pch = 22,
+       col = cols[sort(unique(as.numeric(vfred$phylum)))], cex = 0.8, title = "Invertebrate phylum")
+abline(v = 0, h = 0, lty = 2, col = "grey60")
+
+# positions of arrows and viral families names
+for (i in 1:length(colnames(vfred[,5:dim(vfred)[2]]))){
+  if ((i %in% which(abs(abundPC4$rotation[,1]) > 0.25)) |  (i %in% which(abs(abundPC4$rotation[,2]) > 0.25))){
+    shape::Arrows(x0 = 0, y0 = 0, x1 = abundPC4$rotation[i,1] * 25, y1 = abundPC4$rotation[i,2] * 25, arr.width = 0.1, code = 2, col = "grey60")
+      if (colnames(vfred[,5:dim(vfred)[2]])[i] %in% c("Microviridae", "Dicistroviridae")) {
+      text(x = abundPC4$rotation[i,1] * 25 + 0.5, y = abundPC4$rotation[i,2]*25 - 1.8,labels = colnames(vfred[,5:dim(vfred)[2]])[i], cex = 0.8)
+      next
+    }
+    if (abundPC4$rotation[i,2] > 0) text(x = abundPC4$rotation[i,1] * 25, y = abundPC4$rotation[i,2]*25 + 1.2,
+                                         labels = colnames(vfred[,5:dim(vfred)[2]])[i], cex = 0.8)
+    else text(x = abundPC4$rotation[i,1]*25, y = abundPC4$rotation[i,2]*25 - 1.2,
+              labels = colnames(vfred[,5:dim(vfred)[2]])[i], cex = 0.8)
+  }
+}
+####
+
+#### VS2 ####
+tpm_vs2 <- read.csv("data/sample50/vs2_def_tpm.csv", header = T)
+tpm_vs2$phylum <- factor(tpm_vs2$phylum)
+tpm_vs2$species <- factor(tpm_vs2$species)
+tpm_vs2$accession <- factor(tpm_vs2$accession)
+tpm_vs2$habitat <- factor(tpm_vs2$habitat)
+# filter null rows and null columns
+vs2red <- tpm_vs2[which(apply(tpm_vs2[,5:dim(tpm_vs2)[2]], 1, sum) > 0),
+                which(apply(tpm_vs2[,5:dim(tpm_vs2)[2]], 2, sum) > 0)]
+levels(vs2red$phylum) <- c("ANN", "ART", "CNI")
+# sacamos la matriz de solo composiciones, X
+XVS2 <- vs2red[,5:dim(vs2red)[2]]
+XimpVS2 <- zCompositions::multRepl(XVS2, label = 0, dl = rep(0.1, dim(XVS2)[2]), z.warning = 0.99)
+YVS2 <- compositions::clr(XimpVS2)
+cols <- rainbow(9)
+colnames(vs2red)[which(colnames(vs2red) == "Unclassified.viruses")] = "Uncertain family"
+
+abundPC5 <- prcomp(x = YVS2, scale = F)
+(pc1 <- abundPC5$sdev[1]/sum(abundPC5$sdev))
+(pc2 <- abundPC5$sdev[2]/sum(abundPC5$sdev))
+plot(abundPC5$x[,1], abundPC5$x[,2], pch = as.numeric(vs2red$habitat) + 22,
+     col = cols[as.numeric(vs2red$phylum)], bg = "grey90",
+     xlab = paste("PC1(",round(pc1,4)*100,"%)", collapse = ""), 
+     ylab = paste("PC2(",round(pc2,4)*100,"%)", collapse = ""), las = 1, cex = 1.4)
+legend("topright", legend = levels(vs2red$habitat), pch = 22 + (1:4),
+       cex = 0.8, title = "Habitat")
+legend("bottomright", legend = sort(unique(vs2red$phylum)), pch = 22,
+       col = cols[sort(unique(as.numeric(vs2red$phylum)))], cex = 0.8, title = "Invertebrate phylum")
+abline(v = 0, h = 0, lty = 2, col = "grey60")
+
+# positions of arrows and viral families names
+for (i in 1:length(colnames(vs2red[,5:dim(vs2red)[2]]))){
+  if ((i %in% which(abs(abundPC5$rotation[,1]) > 0.22)) |  (i %in% which(abs(abundPC5$rotation[,2]) > 0.22))){
+    shape::Arrows(x0 = 0, y0 = 0, x1 = abundPC5$rotation[i,1] * 8, y1 = abundPC5$rotation[i,2] * 7, arr.width = 0.1, code = 2, col = "grey60")
+    if (colnames(vs2red[,5:dim(vs2red)[2]])[i] == "Iridoviridae") {
+      text(x = abundPC5$rotation[i,1] * 8 + 0.3, y = abundPC5$rotation[i,2]*8 - 0.7,labels = colnames(vs2red[,5:dim(vs2red)[2]])[i], cex = 0.8)
+      next
+    }
+    if (colnames(vs2red[,5:dim(vs2red)[2]])[i] %in% c("Myoviridae", "Adintoviridae")) {
+      text(x = abundPC5$rotation[i,1] * 8 + 0.7, y = abundPC5$rotation[i,2]*8 - 0.1,labels = colnames(vs2red[,5:dim(vs2red)[2]])[i], cex = 0.8)
+      next
+    }
+    if (colnames(vs2red[,5:dim(vs2red)[2]])[i] == "Uncertain family") {
+      text(x = abundPC5$rotation[i,1] * 8 - 1, y = abundPC5$rotation[i,2]*8 - 0.1,labels = colnames(vs2red[,5:dim(vs2red)[2]])[i], cex = 0.8)
+      next
+    }
+    if (abundPC5$rotation[i,2] > 0) text(x = abundPC5$rotation[i,1] * 8, y = abundPC5$rotation[i,2]*8 + 0.4,
+                                         labels = colnames(vs2red[,5:dim(vs2red)[2]])[i], cex = 0.8)
+    else text(x = abundPC5$rotation[i,1]*8, y = abundPC5$rotation[i,2]*8 - 0.4,
+              labels = colnames(vs2red[,5:dim(vs2red)[2]])[i], cex = 0.8)
+  }
+}
+####
+
+```
+```{=latex}
+\caption{Biplot representation for PCA of VirFinder and VirSorter2 results (Pilot).\label{fig:sample50pcavfvs2}}
+The contigs predicted to be viral according to VirFinder and VirSorter2 models were taxonomically classified into viral families using DIAMOND blastx. Both programs greatly differ in the average proportion of contigs considered viral, with VirSorter2 being much more conservative than VirFinder. \textbf{A.} Biplot of VirFinder PCA results does not reproduce what was seen in the straight DIAMOND analysis, since groups are more scattered and cnidarians lie in between annelids and arthropods, thus bluring out the habitat distinction of viromes. \textbf{B.} VirSorter2 reduced subset of contigs is enough to obtain similar conclusions to the DIAMOND analysis over the full set of contigs, since the distribution of scores and loadings is fairly similar, although higher within-group variation is noted. For both biplots, loadings vectors of most influential viral families for PC1 and PC2 are displayed. The scale of loadings does not correspond with the values on the axes and interpretations must be made in relative terms.
+\end{figure}
+```
+
+```{=latex}
+\begin{figure}[!htbp]
+```
+```{r echo = F, results = F, fig.height=6, fig.width=13}
+par(mar = c(4,4,2,1), mfrow = c(1,2))
+
+#### CAT ####
+tpm_cat <- read.csv("data/sample50/cat_def_tpm.csv", header = T)
+tpm_cat$phylum <- factor(tpm_cat$phylum)
+tpm_cat$species <- factor(tpm_cat$species)
+tpm_cat$accession <- factor(tpm_cat$accession)
+tpm_cat$habitat <- factor(tpm_cat$habitat)
+# filter null rows and null columns
+catred <- tpm_cat[which(apply(tpm_cat[,5:dim(tpm_cat)[2]], 1, sum) > 0),
+                which(apply(tpm_cat[,5:dim(tpm_cat)[2]], 2, sum) > 0)] 
+# 115 non-null obs. and 54 non-null families
+1 - mean(tpm_cat[,5:dim(tpm_cat)[2]] > 0)
+1 - mean(catred[,5:dim(catred)[2]] > 0)
+
+# remove observations with sources of bias as in Kaiju
+df <- read.delim("data/db_def_con_DNA.tsv", header = T)
+
+catred <- catred[which(catred$accession %in% 
+                          dplyr::filter(df, 
+                                        bases > 2, libsource != "GENOMIC")$run),]
+catred <- rbind(catred[which(catred$species != "Exaiptasia diaphana"),], 
+                  catred[which(catred$run %in% c("SRR6202261", "SRR6202279", "SRR6202281")),])
+# filter new null columns
+catred <- catred[which(apply(catred[,5:dim(catred)[2]], 1, sum) > 0),
+                which(apply(catred[,5:dim(catred)[2]], 2, sum) > 0)] 
+
+
+levels(catred$phylum) <- c("ANN", "ART","CNI", "NMD", "PLT", "POR", "ROT", "URO")
+# sacamos la matriz de solo composiciones, X
+Xcat <- catred[,5:dim(catred)[2]]
+Ximpcat <- zCompositions::multRepl(Xcat, label = 0, dl = rep(0.001, dim(Xcat)[2]), z.warning = 0.999)
+Ycat <- compositions::clr(Ximpcat)
+cols <- rainbow(9)[-3]
+colnames(catred)[which(colnames(catred) == "Unclassified.viruses")] = "Uncertain family"
+
+abundPC6 <- prcomp(x = Ycat, scale = F)
+(pc1 <- abundPC6$sdev[1]^2/sum(abundPC6$sdev^2))
+(pc2 <- abundPC6$sdev[2]^2/sum(abundPC6$sdev^2))
+plot(abundPC6$x[,1], abundPC6$x[,2], pch = as.numeric(catred$habitat) + 20,
+     col = cols[as.numeric(catred$phylum)], bg = "grey90",
+     xlab = paste("PC1(",round(pc1,4)*100,"%)", collapse = ""), 
+     ylab = paste("PC2(",round(pc2,4)*100,"%)", collapse = ""), las = 1, cex = 1.4)
+legend("top", legend = levels(catred$habitat), pch = 20 + (1:4),
+       cex = 0.8, title = "Habitat")
+legend("bottomleft", legend = sort(unique(catred$phylum)), pch = 22,
+       col = cols[sort(unique(as.numeric(catred$phylum)))], cex = 0.8, title = "Invertebrate phylum")
+abline(h = 0, lty = 2, col = "grey60")
+abline(v = 0, lty = 2, col = "grey60")
+# positions of arrows and viral families names
+for (i in 1:length(colnames(catred[,5:dim(catred)[2]]))){
+  if ((i %in% which(abs(abundPC6$rotation[,1]) > 0.2)) |  (i %in% which(abs(abundPC6$rotation[,2]) > 0.2))){
+    shape::Arrows(x0 = 0, y0 = 0, x1 = abundPC6$rotation[i,1] * 20, y1 = abundPC6$rotation[i,2] * 20, arr.width = 0.1, code = 2, col = "grey60")
+    if (abundPC6$rotation[i,2] > 0) text(x = abundPC6$rotation[i,1] * 20, y = abundPC6$rotation[i,2]*20 + 0.4,
+                                         labels = colnames(catred[,5:dim(catred)[2]])[i], cex = 0.8)
+    else text(x = abundPC6$rotation[i,1]*20, y = abundPC6$rotation[i,2]*20 - 0.4,
+              labels = colnames(catred[,5:dim(catred)[2]])[i], cex = 0.8)
+  }
+}
+# ####
+# ```
+# 
+# 
+# ```{r echo = F, results = F, fig.height=7}
+library(vegan)
+#PERMANOVA and PERMDISP tests excluding scarce invertebrate phyla using Aitchison distances
+adonis(Ycat[-which(catred$phylum %in% c("ROT", "URO"))] ~ catred$phylum[-which(catred$phylum %in% c("ROT", "URO"))], method = "euclidean")$aov.tab # casi 30% de las distancias se explican por el filo del invertebrado
+dists <- vegdist(Ycat[-which(catred$phylum %in% c("ROT", "URO"))], method = "euclidean")
+permdisp <- betadisper(dists, group = catred$phylum[-which(catred$phylum %in% c("ROT", "URO"))])
+plot(permdisp, ellipse = T, hull = F, col =  cols, label = F, xlab = paste("PCo1 (", round(100*abs(permdisp$eig[1]) /
+                                                     sum(abs(permdisp$eig)), 2), "%)"),
+                      ylab = paste("PCo2 (", round(100*abs(permdisp$eig[2]) /
+                                                     sum(abs(permdisp$eig)), 2), "%)"),
+                      main = "", las = 1, xlim = c(-0.4,0.3), cex = 1.1, lwd = 1.75)
+anova(permdisp, catred$phylum)
+text(x = permdisp$centroids[,1] + 1, y = permdisp$centroids[,2] + 1, labels = c("ab", "a", "b", "b", "ab"), cex = 0.8)
+abline(v = 0, h = 0, lty = 2, col = "grey60")
+TukeyHSD(permdisp) # dispersion is significantly lower in arthropods than in cnidarians and nematodes
+legend(x = "bottomright", legend= levels(catred$phylum)[1:5], col= rainbow(9)[c(1:2,4:6)], pch = 1:5, cex = 1.1)
+# plot(permdisp, hull = F, ellipse = T)
+
+```
+```{=latex}
+\caption{Multivariate exploratory analyses of CAT results (Pilot).\label{fig:sample50pcacat}}
+\textbf{A.} PCA biplot was performed over CAT $clr$-transformed results after filtering DNA and low sequencing depth experiments. \textbf{B.} Rotifera and Urochordata groups were excluded for having only one observation each. Similar to what was observed for PERMANOVA results with DIAMOND data, invertebrate phylum distinction of the samples originates significant differences in location and/or dispersion ($P < 0.05$) and is able to explain roughly $30\%$ of the variance in the Aitchison distances matrix. PERMDISP test shows that there are differences in dispersion between phyla ($P < 0.05$). Groupings of phyla according to their dispersion were determined by Tukey test: arthropods seem to have the most uniform viromes and cnidarians and nematodes the most diverse.
+\end{figure}
+
+```
+
+
+```{=latex}
+\begin{figure}[!htbp]
+```
+```{r echo = F, results = F}
+nreads <- read.csv("/home/pau/TFM/bookdown_tfm/data/definitivo/nreads/todos.csv")
+
+# proportion of remaining reads after each preprocessing step
+nreads$prop.clumpi <- nreads$clumpify.output.reads/nreads$clumpify.input.reads # porcentaje de no duplicados
+nreads$prop.sortme <- nreads$Trimmomatic.input.reads/nreads$clumpify.output.reads
+nreads$prop.trimmo <- nreads$Trimmomatic.output.reads/nreads$Trimmomatic.input.reads
+nreads$prop.global <- nreads$Trimmomatic.output.reads/nreads$clumpify.input.reads
+
+nreads_limpio <- na.omit(nreads)
+ftr <- factor(rep(1:4, rep(79, 4)))
+levels(ftr) = c("Clumpify", "Sortmerna", "Trimmomatic", "Global")
+boxplot(unlist(nreads_limpio[,6:9]) ~ ftr, main = "Proportion of remaining reads after preprocessing",
+        xlab = "", ylab = "Proportion of remaining reads", las = 1, outcol = "dodgerblue", pch = 16, cex = 1.2)
+abline(h = seq(0,1,by = 0.1), lty = 3, col = "grey60")
+boxplot(unlist(nreads_limpio[,6:9]) ~ ftr, main = "Proportion of remaining reads after preprocessing",
+        xlab = "", ylab = "Proportion of remaining reads", las = 1, col = c(rep("dodgerblue",3),"gray70"),
+        pch = 1,add = T, cex = 1.2)
+
+
+# hist(dplyr::filter(kaiju, phylum %in% c("ANN", "ART","NMD", "CNI", "ECH", "NME", "ONY", "ORT", "PHO", "PLA", "PLT", "POR", "PRI", "ROT", "TAR", "URO", "XEN"))$bases, main = "Histogram of Gbases per sample", breaks = 36,
+#      xlab = "Gbases")
+
+# pairs(nreads_limpio[,6:8])
+```
+```{=latex}
+\caption{Proportion of reads preserved after each preprocessing step of the definitive pipeline.\label{fig:preprocess}}
+Each preprocessing step is evaluated over the subset of reads left after the previous steps: while Clumpify performs deduplication on the original set of raw reads, removal of reads with SortMeRNA is relative to the subset of reads without duplicates. The reported proportion of remaining reads for Trimmomatic refers to the subset of reads preserved after Clumpify and SortMeRNA. The distribution of the global proportion of reads left after the whole preprocessing is displayed in grey in the figure.
+\end{figure}
+
+```
+
+
+
+
+
+```{=latex}
+\begin{figure}[!htbp]
+```
+```{r echo = F, results = F, fig.width=12, fig.height=8}
+tiempos <- read.csv("/home/pau/TFM/bookdown_tfm/data/definitivo/tiempos.csv", header = T, sep = "\t", dec = ",")
+
+tiempos[,4:11] <- apply(tiempos[,4:11], 2, function(x) as.numeric(x))
+
+# timesplot <- as.data.frame(cbind(rep(1:8, rep(128, 8)), unlist(tiempos[,4:11])))
+# timesplot$V1 <- factor(timesplot$V1)
+# levels(timesplot$V1) <- c("Trimmomatic", "clumpify", "SortMeRNA", "Trinity", "DIAMOND", "Kallisto", "Kaiju", "fasterq-dump")
+# timesplot$acc <- rep(tiempos$run, 8)
+# timesplot$V1 <- relevel(timesplot$V1, ref = 8)
+# boxplot(timesplot$V2 ~ timesplot$V1, main = "Elapsed times (min)", xlab = "", ylab = "Time (min)")
+# summary(tiempos[,4:11])
+# abline(h = seq(0,1500, by = 100), col = "grey60", lty = 3)
+# 
+
+# a horas y reordenado
+par(mfrow = c(2,1), mar = c(2,4,2,1))
+dmnd <- read.csv("data/definitivo/tablas/merged_diamond_tpm_pau_E-8.csv", header = T, sep = ",")
+df <- read.delim("data/db_def_solo_RNA.tsv", header = T)[,-20]
+dmnd <- cbind(dplyr::filter(df, run %in% dmnd$accession)[order(dplyr::filter(df, run %in% dmnd$accession)$run),], dmnd[order(dmnd$accession), 2:dim(dmnd)[2]])
+
+timesplot <- as.data.frame(cbind(rep(1:8, rep(128, 8)), unlist(tiempos[,c(11,5,6,4,7:10)])))
+timesplot$V1 <- factor(timesplot$V1)
+levels(timesplot$V1) <- c("fasterq-dump", "clumpify", "SortMeRNA", "Trimmomatic", "Trinity", "DIAMOND", "Kallisto", "Kaiju")
+boxplot(timesplot$V2/60 ~ timesplot$V1, xlab = "", ylab = "Time (h)", col = "dodgerblue", outcol = "dodgerblue", pch = 16, cex = 1.2, las = 1)
+abline(h = seq(0,30, by = 1)[-which(seq(0,30, by = 1) %in% seq(0,30, by = 5))], col = "grey60", lty = 3)
+abline(h = seq(0,30, by = 5), col = "grey60", lty = 3, lwd = 2)
+boxplot(timesplot$V2/60 ~ timesplot$V1, col = "dodgerblue",
+        pch = 1, cex = 1.2, add = T, xaxt = "n", yaxt = "n")
+
+timesplot$acc <- rep(tiempos$run, 8)
+title(main = "A                                                                                                                                                                                                             ", line = 0.8)
+
+par(mar = c(4,4,2,1))
+save <- merge(na.omit(timesplot), dmnd, by.x = "acc", by.y = "run", no.dups = F)
+vec <- as.vector(by(save$V2, INDICES = save$acc, FUN = sum))
+names(vec) <- names(by(save$V2, INDICES = save$acc, FUN = sum))
+
+temps_total <- merge(data.frame(tiempo = vec, run = names(vec)), dmnd[,c(2,19)], by = "run")
+plot(temps_total$bases/1e9, temps_total$tiempo/60, xlab = "Sequenced Gbases per SRA accession",
+     ylab = "Total pipeline runtime (h)", pch = 16, las = 1,
+     xaxt = "n") #mete pila dispersion el preprocesado se-gu-ro
+axis(side = 1, seq(0,100, by = 5))
+abline(v = seq(0,100, by = 5), lty = 3, col = "grey60")
+title(main = "B                                                                                                                                                                                                             ", line = 0.8)
+
+# summary(lm(temps_total$tiempo ~ temps_total$bases))
+# summary(temps_total$tiempo)
+```
+```{=latex}
+\caption{Distribution of runtimes in the definitive pipeline.\label{fig:pipelinetimes}}
+\textbf{A.} Time elapsed in hours by each program in the order of the pipeline. The fact that distributions are positively skewed is likely due to overload in the HPC task manager (slurm) and the presence of accessions with particularly large library sizes. \emph{De novo} assembly constitutes the slowest step, although a noticeable filtering of reads was performed in the preprocessing. \textbf{B.} The total processing time of the accessions is positively related to their library sizes. $50\%$ of central individuals in the distribution of library sizes have between 5 to 8 Gb sequenced.
+\end{figure}
+
+```
+
+
+```{=latex}
+\begin{figure}[!htbp]
+```
+```{r echo = F, results = F, fig.height = 9, fig.width = 8}
+dmnd <- read.csv("data/definitivo/tablas/diamond_conjunto_tpm.csv", header = T, sep = ",")
+df <- read.delim("data/db_def_solo_RNA.tsv", header = T)[,-20]
+dmnd <- cbind(dplyr::filter(df, run %in% dmnd$accession)[order(dplyr::filter(df, run %in% dmnd$accession)$run),], dmnd[order(dmnd$accession),1:dim(dmnd)[2]])
+
+ncontigs <- read.delim("data/definitivo/ncontigs.txt", header = T, sep = ",")
+E90N50 <- read.delim("data/definitivo/E90N50stat.txt", header = T)
+pipeline_control <- merge(x = ncontigs, y = nreads, by = "acc")
+pipeline_control <- na.omit(pipeline_control)
+pipeline_control <- merge(pipeline_control, E90N50, by = "acc")
+
+layout(matrix(c(1,2,3,3), 2, 2, byrow = TRUE))
+par(mar = c(1,4,2,1))
+#### A ####
+boxplot(pipeline_control$n.mapped.reads/pipeline_control$Trimmomatic.output.reads, las = 1,
+        main = "", outcol = "dodgerblue", pch = 16, cex = 1.2, ylab = "Proportion of mapped reads")
+abline(h = seq(0,1, by = 0.2), lty = 3, col = "grey60")
+abline(h = seq(0.1,1.1, by = 0.2), lty = 3, col = "grey60", lwd = 0.5)
+boxplot(pipeline_control$n.mapped.reads/pipeline_control$Trimmomatic.output.reads, add = T,
+        main = "Proportion of mapped reads (79 accessions)", col = "dodgerblue", pch = 1, cex = 1.2, yaxt = "n")
+
+title(main = "A                                                                          ", line = 0.8, cex = 1)
+#### B ####
+par(mar = c(5,4,2,1))
+plot(x = pipeline_control$n.mapped.reads/pipeline_control$Trimmomatic.output.reads, y = pipeline_control$ExN50,
+     main = "", pch = 16, cex = 1.2, las = 1, ylab = "E90N50 (bp)", xlab = "Proportion of mapped reads")
+abline(h = seq(0,4000, by = 500), col = "grey60", lty = 3, lwd = 0.5)
+title(main = "B                                                                          ", line = 0.8, cex = 1)
+#### C ####
+
+#### loading also E90N50 of AB's phyla ####
+dmnd <- read.csv("data/definitivo/tablas/diamond_conjunto_tpm.csv", header = T, sep = ",")
+df <- read.delim("data/db_def_solo_RNA.tsv", header = T)[,-20]
+dmnd <- cbind(dplyr::filter(df, run %in% dmnd$accession)[order(dplyr::filter(df, run %in% dmnd$accession)$run),], dmnd[order(dmnd$accession),1:dim(dmnd)[2]])
+dmnd$bases <- dmnd$bases/1e9
+
+cbind(dmnd$accession, dmnd$run) # bien emparejado
+
+table(dmnd$phylum)
+
+dmnd$habitat <- factor(dmnd$habitat)
+dmnd$phylum <- factor(dmnd$phylum)
+
+levels(dmnd$phylum) <- c("ANN", "ART", "BRA", "BRY", "CHA", "CNI", "CTE", "CYC", "DIC", "ECH", "ENT", "GAS", "GNA", "HEM", "KIN", "LOR", "MOL", "NMD", "NMM", "NME", "ONY", "ORT", "PHO", "PLA", "PLT", "POR", "PRI", "ROT", "TAR", "URO", "XEN")
+
+quals <- read.delim("data/definitivo/E90N50stat_todos.txt", header = T)
+colnames(quals)[1] = "run"
+obj <- merge(quals, dmnd, by = "run")
+
+
+par(mar = c(4,4,3,1))
+# E90N50phyl <- merge(E90N50, dmnd[,c(2:20)], by.x = "acc", by.y = "run")
+# E90N50phyl$phylum <- factor(E90N50phyl$phylum)
+# levels(E90N50phyl$phylum) <- c("ANN", "ART","NMD", "CNI", "ECH", "NME", "ONY", "ORT", "PHO", "PLA", "PLT", "POR", "PRI", "ROT", "TAR", "URO", "XEN")
+par(cex = 0.8, cex.axis = 0.7)
+boxplot(obj$ExN50 ~ obj$phylum, main = "", xlab = "Phylum", 
+        ylab = "E90N50 (bp)", outcol = "dodgerblue", pch = 16, cex = 1.2, las = 1)
+abline(h = seq(0,4000, by = 500), col = "grey60", lty= 3, xaxt= "n")
+boxplot(obj$ExN50 ~ obj$phylum, main = "", add = T,
+        col = "dodgerblue", pch = 1, cex = 1.2, yaxt = "n", xaxt = "n")
+title(main = "C                                                                                                                                                            ", line = 0.8, cex = 1)
+
+```
+```{=latex}
+\caption{Overview of assembly statistics in the definitive analysis.\label{fig:assemblystats}}
+\textbf{A.} Proportion of reads left after Trimmomatic that were mapped into contigs with Trinity. \textbf{B.} Assemblies that arise from a low proportion of reads tend to form contigs of lower length and thus, assemblies of lower quality. \textbf{C.} Quality of assemblies is not uniformly distributed among samples of different invertebrate phyla. This could be due to either experimental or biological reasons. Interestingly enough, this is not an artifact of library sizes, which are distributed similarly among phyla.
+\end{figure}
+
+```
+
+
+```{=latex}
+\begin{figure}[!htbp]
+```
+```{r echo = F, results = F, fig.height= 8, fig.width=8}
+par(mfrow = c(1,2))
+dmnd <- read.csv("data/definitivo/tablas/diamond_conjunto_tpm.csv", header = T, sep = ",")
+df <- read.delim("data/db_def_solo_RNA.tsv", header = T)[,-20]
+dmnd <- cbind(dplyr::filter(df, run %in% dmnd$accession)[order(dplyr::filter(df, run %in% dmnd$accession)$run),], dmnd[order(dmnd$accession),1:dim(dmnd)[2]])
+dmnd$bases <- dmnd$bases/1e9
+
+cbind(dmnd$accession, dmnd$run) # bien emparejado
+
+table(dmnd$phylum)
+
+dmnd$habitat <- factor(dmnd$habitat)
+dmnd$phylum <- factor(dmnd$phylum)
+
+levels(dmnd$phylum) <- c("ANN", "ART", "BRA", "BRY", "CHA", "CNI", "CTE", "CYC", "DIC", "ECH", "ENT", "GAS", "GNA", "HEM", "KIN", "LOR", "MOL", "NMD", "NMM", "NME", "ONY", "ORT", "PHO", "PLA", "PLT", "POR", "PRI", "ROT", "TAR", "URO", "XEN")
+
+
+
+
+
+quals <- read.delim("data/definitivo/E90N50stat_todos.txt", header = T)
+colnames(quals)[1] = "run"
+obj <- merge(quals, dmnd, by = "run")
+summary(obj$ExN50)
+X <- dmnd[,21:dim(dmnd)[2]]
+
+# boxplot(obj$ExN50 ~ obj$phylum) muchos nombres
+
+
+# plot(obj$ExN50, apply(obj[,24:dim(obj)[2]], 1, diff_fams)) # E90N50 not related to alpha div
+
+# plot(obj$ngenes_contribute_to_Ex, apply(obj[,24:dim(obj)[2]], 1, diff_fams)) # number of 90% most expressed contigs is log related to alpha div
+
+par(mfrow = c(2,1))
+par(mar = c(4,4,3,0))
+par(cex.axis = 0.7)
+
+boxplot(apply(X, 1, sum)/1e6 ~ dmnd$phylum, pch = 16, outcol = "dodgerblue",
+        xlab = "Invertebrate phylum", ylab = "Proportion of non-rRNA viral transcripts", las = 1, cex = 1.2,
+        main = "A                                                                                                                                                   ")
+abline(h = seq(0.05,1,by = 0.1), lty = 3, col = "grey60", lwd = 1)
+abline(h = seq(0.1,1,by = 0.1), lty = 3, col = "grey60", lwd = 2)
+boxplot(apply(X, 1, sum)/1e6 ~ dmnd$phylum, add = T, col = "dodgerblue", xaxt = "n", yaxt = "n", cex = 1.2)
+
+
+
+par(cex.axis = 1)
+plot(y = apply(obj[,24:dim(obj)[2]], 1, sum)/1e6, x = obj$ExN50, ylab = "Proportion of viral transcripts (non-rRNA)",
+     xlab = "E90N50", las = 1, pch = 16, 
+     main = "B                                                                                                                                                  ")
+summary(lm(I(apply(obj[,24:dim(obj)[2]], 1, sum)/1e6) ~ obj$ExN50))
+cor(obj$ExN50, apply(obj[,24:dim(obj)[2]], 1, sum))
+lines(1:5000, coef(lm(I(apply(obj[,24:dim(obj)[2]], 1, sum)/1e6) ~ obj$ExN50))[1] + coef(lm(I(apply(obj[,24:dim(obj)[2]], 1, sum)/1e6) ~ obj$ExN50))[2]*(1:5000))
+text(x = 3600, y = 0.11, labels = "P < 0.05")
+text(x = 3600, y = 0.08, labels = expression(paste(R^"2", " = 0.51")))
+text(x = 3600, y = 0.045, labels = expression(paste(rho, " = 0.71")))
+
+
+# plot(apply(obj[,24:dim(obj)[2]], 1, diff_fams), obj$ExN50, xlab = "Percentage of viral reads (non-rRNA)",
+#      ylab = "E90N50", las = 1)
+
+# plot(obj$ngenes_contribute_to_Ex, apply(obj[,24:dim(obj)[2]], 1, sum))
+```
+```{=latex}
+\caption{Distribution of the proportion of viral transcripts in DIAMOND results.\label{fig:virqual}}
+\textbf{A.} The concentration of viral transcripts in the non-rRNA, non-COX transcriptome in a similar way to E90N50 across phyla in the sampled observations. For instance, Onychophora shows very low virus transcript concentrations while Placozoa shows much higher ones. \textbf{B.} A simple linear regression model fits the relationship between total virus abundance and E90N50 relatively well.
+
+
+\end{figure}
+
+```
+
+
+
+```{=latex}
+\begin{figure}[!htbp]
+```
+```{r echo = F, results = F, fig.height=7, fig.width=8}
+# habitat
+
+dmnd <- read.csv("data/definitivo/tablas/diamond_conjunto_tpm.csv", header = T, sep = ",")
+df <- read.delim("data/db_def_solo_RNA.tsv", header = T)[,-20]
+dmnd <- cbind(dplyr::filter(df, run %in% dmnd$accession)[order(dplyr::filter(df, run %in% dmnd$accession)$run),], dmnd[order(dmnd$accession),1:dim(dmnd)[2]])
+dmnd$bases <- dmnd$bases/1e9
+
+cbind(dmnd$accession, dmnd$run) # bien emparejado
+
+table(dmnd$phylum)
+
+dmnd$habitat <- factor(dmnd$habitat)
+dmnd$phylum <- factor(dmnd$phylum)
+
+levels(dmnd$phylum) <- c("ANN", "ART", "BRA", "BRY", "CHA", "CNI", "CTE", "CYC", "DIC", "ECH", "ENT", "GAS", "GNA", "HEM", "KIN", "LOR", "MOL", "NMD", "NMM", "NME", "ONY", "ORT", "PHO", "PLA", "PLT", "POR", "PRI", "ROT", "TAR", "URO", "XEN")
+
+library(vegan)
+
+dmnd_red <- dmnd[which(dmnd$phylum %in% names(which(table(dmnd$phylum) > 4))),]
+
+dmnd_red$phylum <- factor(as.character(dmnd_red$phylum))
+dmnd_red$habitat <- factor(as.character(dmnd_red$habitat))
+
+table(dmnd_red$phylum)
+Xred <- dmnd_red[,21:dim(dmnd_red)[2]]
+Xred <- Xred[, which(apply(Xred, 2, function(x) length(which(x > 0))/dim(Xred)[1]) > 0.2)]
+
+Ximpred <- zCompositions::multRepl(Xred, label = 0, dl = rep(0.001, dim(Xred)[2]), z.warning = 0.8)
+# zCompositions::zPatterns(Xred, label = 0)
+Yred <- compositions::clr(Ximpred)
+
+modh <- vegan::betadisper(dist(Yred, method = "euclidean"), group = dmnd_red$habitat)
+# suppressWarnings(plot(vegan::betadisper(dist(Yred, method = "euclidean"), group = dmnd_red$phylum), hull = F, ellipse = T, cex = 0.6, label = T, col = rainbow(5)))
+
+par(mar = c(4,4,2,1))
+
+suppressWarnings(plot(modh, label = T, ellipse = T, hull = F,
+                      col = c(rainbow(5)[c(1,5)], viridis::viridis(5)[c(2,4,5)]), pch = c(17,17,17,17,17),
+                      xlab = paste("PCo1 (", round(100*abs(modh$eig[1]) /
+                                                     sum(abs(modh$eig)), 2), "%)"),
+                      ylab = paste("PCo2 (", round(100*abs(modh$eig[2]) /
+                                                     sum(abs(modh$eig)), 2), "%)"),
+                      main = "", las = 1, cex = 1, lwd = 0.5, segments = T))
+legend("bottomright", legend = c("Brackish", "Freshwater", "Intertidal zone", "Marine", "Terrestrial"), title = "Habitat", pch = 17, col = c(rainbow(5)[c(1,5)], viridis::viridis(5)[c(2,4,5)]))
+
+```
+```{=latex}
+\caption{PCoA over the Aitchison distances matrix of DIAMOND results.\label{fig:habpcoa}}
+PCoA was performed over the Aitchison distances of the $209\times54$ compositional matrix with observations of the 18 most abundant phyla. Two first principal coordinates are able to explain roughly $19\%$ of the variance. Freshwater viromes are the most divergent from the rest in terms of composition. Apparently, they are similarly distant to terrestrial and marine viromes, whose centroids lie closer to each other.
+
+\end{figure}
+
+```
+
+```{=latex}
+\begin{figure}[!htbp]
+```
+```{r echo = F, results = F, fig.width=8}
+wqual <- merge(quals, dmnd, by = "run") # poner calidad por accession
+
+dmnd_redq  <- wqual[which(wqual$ExN50 > 1000),]
+dmnd_redq <- dmnd_redq[which(dmnd_redq$phylum %in% names(which(table(dmnd_redq$phylum) > 4))),]
+dmnd_redq$phylum <- factor(as.character(dmnd_redq$phylum))
+dmnd_redq$habitat <- factor(as.character(dmnd_redq$habitat))
+
+table(dmnd_redq$phylum) # 11 phyl
+
+T2 <- as.data.frame(table(dmnd_redq$habitat, dmnd_redq$phylum))
+colnames(T2) <- c("Habitat", "Phylum", "Frequency")
+
+plot1 <- ggplot(T2,aes(x=Phylum,y=Frequency,fill=Habitat)) + geom_col(width=0.3) +
+  theme_bw() + ylab("Sampled accessions") + scale_y_continuous(breaks= seq(0,15, by = 5),
+                                                               minor_breaks = seq(0,15, by = 1)) +
+  theme(legend.position="bottom",
+        axis.text=element_text(size=12))
+plot1
+```
+```{=latex}
+\caption{Distribution of habitats within phyla for the subset of high quality assemblies.\label{fig:qualdiver}}
+Only phyla with more than four associated accessions remaining are displayed in the figure.
+
+
+\end{figure}
+
+```
+
+
+
+```{=latex}
+\begin{figure}[!htbp]
+```
+```{r echo = F, results = F}
+matriz <- as.matrix(read.delim("data/definitivo/pairwise_perm_tests.tsv"))
+rownames(matriz) <- colnames(matriz)
+nphyl <- dim(matriz)[1]
+
+
+
+par(mar = c(0.1,0.1,0.1,0.1))
+plot(1:nphyl,1:nphyl, type = "n", xlim = c(1,nphyl+1.1), ylim = c(1.9,nphyl + 2), xaxt = "n", yaxt = "n", bty = "n")
+for (i in 1:nphyl){
+  for (j in 1:nphyl){
+    # i - j < 1 para ignorar la diagonal
+    if  (i - j < 0) next
+    if (matriz[i,j] == "A") {polygon(c(i-0.5,i-0.5,i+0.5,i+0.5)+1, c(nphyl + 1-j-0.5,nphyl + 1-j+0.5,nphyl + 1-j+0.5,nphyl + 1-j-0.5) + 1, col = "tomato")}
+    if (matriz[i,j] == "B") {polygon(c(i-0.5,i-0.5,i+0.5,i+0.5)+1, c(nphyl + 1-j-0.5,nphyl + 1-j+0.5,nphyl + 1-j+0.5,nphyl + 1-j-0.5) + 1, col = "orange")}
+    if (matriz[i,j] == "C") {polygon(c(i-0.5,i-0.5,i+0.5,i+0.5)+1, c(nphyl + 1-j-0.5,nphyl + 1-j+0.5,nphyl + 1-j+0.5,nphyl + 1-j-0.5) + 1, col = "yellow")}
+    else {polygon(c(i-0.5,i-0.5,i+0.5,i+0.5)+1, c(nphyl + 1-j-0.5,nphyl + 1-j+0.5,nphyl + 1-j+0.5,nphyl + 1-j-0.5) + 1)}
+  }
+}
+text(x = c(1:11), y = c(seq(12,2)), labels = rownames(matriz), cex = 1)
+# text(x = c(1), y = c(seq(12,2)), labels = levels(suyos_sin_raros$phylum), cex = 2)
+text(x = c(2:12), y = 13, labels = rownames(matriz), cex = 1)
+# legend("bottomleft", legend = c("Non signficant location difference", "Significant difference in dispersions",
+#                                 "Significant difference in dispersions and possibly in locations",
+#                                 "Significant location difference"),
+#        pch = 15, col = c("white", "yellow", "orange", "tomato"), cex = 1, bg = "grey60")
+legend(x = 1, y = 5.5, legend = c("Non signficant location difference",
+                                "Significant difference in dispersions 
+and possibly in locations",
+                                "Significant location difference"),
+       pch = 15, col = c("white", "orange", "tomato"), cex = 1, bg = "grey70")
+```
+```{=latex}
+\caption{Results of pairwise PERMANOVA and PERMDISP tests on the subset of high quality assemblies.\label{fig:permmatrix}}
+The results of the PERMANOVA and PERMDISP tests for each combination of phyla are encoded in its respective cell of the matrix. $p$-values were corrected by $FDR$ method. For a particular combination, if only PERMANOVA yields an adjusted $p$-value lower than $0.05$, significant differences in location are accepted (red). If also PERMDISP yields an adjusted $p$-value lower than 0.05, heterogeneity of dispersions exist between the phyla and the actual location differences are uncertain (orange). In this case, none of the combinations was associated with only a rejection of $H_0$ in PERMDISP. Combinations where no significant differences are found for any of the two tests, such as in the diagonal, are illustrated with white cells. Only the upper triangle of the matrix is shown to avoid redundancy.
+
+\end{figure}
+
+```
+
+
+<!-- ```{=latex} -->
+<!-- \begin{figure}[!htbp] -->
+<!-- ``` -->
+<!-- ```{r grafosqual, echo = F, results = F, fig.height= 7, fig.width=7} -->
+
+<!-- dmnd_redq  <- wqual[which(wqual$ExN50 > 1000),] -->
+<!-- Xredq <- dmnd_redq[,24:dim(dmnd_redq)[2]] -->
+<!-- summary(apply(Xredq, 1, diff_fams)) -->
+<!-- summary(apply(dmnd[,21:dim(dmnd)[2]], 1, diff_fams)) -->
+<!-- IQR(apply(dmnd[,21:dim(dmnd)[2]], 1, diff_fams)) - IQR(apply(Xredq, 1, diff_fams)) -->
+
+
+<!-- dmnd_redq <- dmnd_redq[which(dmnd_redq$phylum %in% names(which(table(dmnd_redq$phylum) > 4))),] -->
+<!-- dmnd_redq$phylum <- factor(as.character(dmnd_redq$phylum)) -->
+<!-- dmnd_redq$habitat <- factor(as.character(dmnd_redq$habitat)) -->
+<!-- table(dmnd_redq$phylum) # 11 phyl -->
+
+<!-- Xredq <- dmnd_redq[,24:dim(dmnd_redq)[2]] -->
+
+
+<!-- Xredq <- Xredq[, which(apply(Xredq, 2, function(x) length(which(x > 0))/dim(Xredq)[1]) > 0.2)] -->
+<!-- # Xredq <- Xredq[, which(apply(Xredq, 2, max) < 1000)] -->
+
+
+<!-- Ximpredq <- zCompositions::multRepl(Xredq, label = 0, dl = rep(0.001, dim(Xredq)[2]), z.warning = 0.8) -->
+<!-- Yredq <- compositions::clr(Ximpredq) -->
+
+
+<!-- nphyl <- length(levels(dmnd_redq$phylum)) -->
+
+<!-- # matriz <- matrix(nrow = nphyl, ncol = nphyl) -->
+<!-- #  -->
+<!-- # colnames(matriz) <- levels(dmnd_redq$phylum) -->
+<!-- # rownames(matriz) <- colnames(matriz) -->
+<!-- #  -->
+<!-- # #para cada phylum -->
+<!-- # for (i in 1:nphyl){ -->
+<!-- #   for (j in 1:nphyl){ -->
+<!-- #     set.seed(872483) -->
+<!-- #     if (i == j){ -->
+<!-- #       matriz[i,j] = "D" -->
+<!-- #       next -->
+<!-- #     } -->
+<!-- #     else { -->
+<!-- #       print(rownames(matriz)[c(i,j)]) -->
+<!-- #       subsetY <- Yredq[which(dmnd_redq$phylum %in% rownames(matriz)[c(i,j)] )] -->
+<!-- #       fdr <- as.numeric(p.adjust( -->
+<!-- #         adonis(subsetY ~ dplyr::filter(dmnd_redq, phylum %in% rownames(matriz)[c(i,j)])$phylum, method = "euclidean" -->
+<!-- #                , permutations = 2000)$aov.tab$`Pr(>F)`[1], "fdr", n = (nphyl^2 - nphyl)/2)) -->
+<!-- #       print(fdr) -->
+<!-- #       fdrp <- as.numeric(p.adjust( -->
+<!-- #         anova(betadisper(vegdist(subsetY, "euclidean"), group = dplyr::filter(dmnd_redq, phylum %in% rownames(matriz)[c(i,j)])$phylum, bias.adjust = F))$`Pr(>F)`[1], "fdr", n = (nphyl^2 - nphyl)/2)) -->
+<!-- #       print(fdrp) -->
+<!-- #       if (fdr < 0.05 & fdrp > 0.05) matriz[i,j] = "A" -->
+<!-- #       if (fdr < 0.05 & fdrp < 0.05) matriz[i,j] = "B" -->
+<!-- #       if (fdr > 0.05 & fdrp < 0.05) matriz[i,j] = "C" -->
+<!-- #       if (fdr > 0.05 & fdrp > 0.05) matriz[i,j] = "D" -->
+<!-- #     } -->
+<!-- #   } -->
+<!-- # } -->
+<!-- # matriz[lower.tri(matriz)] = t(matriz)[lower.tri(matriz)] -->
+
+<!-- # write.table(matriz, file = "data/definitivo/pairwise_perm_tests.tsv", row.names = F, col.names = T) -->
+<!-- matriz <- as.matrix(read.delim("data/definitivo/pairwise_perm_tests.tsv")) -->
+<!-- rownames(matriz) <- colnames(matriz) -->
+
+<!-- suppressMessages(library(igraph)) -->
+<!-- # matriz[lower.tri(matriz)] <- 0 -->
+<!-- # diag(matriz) <- 0 -->
+<!-- matriz[which(matriz == "D")] <- 1 -->
+<!-- matriz[which(matriz == "B")] <- 1 -->
+<!-- matriz[which(matriz == "A")] <- 0 -->
+
+<!-- adjmatriz <- matrix(as.numeric(matriz), nrow = nphyl, ncol = nphyl) -->
+<!-- colnames(adjmatriz) <- colnames(matriz); rownames(adjmatriz) <- rownames(matriz) -->
+<!-- g <- graph.adjacency(adjmatriz, mode = "undirected", diag = F) -->
+<!-- set.seed(1) -->
+<!-- plot(g, main = "") -->
+<!-- ``` -->
+<!-- ```{=latex} -->
+<!-- \caption{Virome equivalence network after pairwise PERMANOVA.\label{fig:grafosqual}} -->
+
+<!-- An adjacency matrix was constructed after converting the $p$-value significance matrix for all combinations of phyla to a binary matrix, where 0 represents only differences in location (significant rejection of PERMANOVA $H_0$) and 1 the rest of possibilities. In the graph, this involves the connection (1) or the separation of vertices (0). Self phylum connections are omitted in this unweighted, undirected graph. The result is a figure that allows the simultaneous visualization of the distinctness or similarity between the viromes of all pairs of phyla. In short, edges represent the equivalence of the 'average' viromes of the vertices they connect. -->
+
+<!-- \end{figure} -->
+
+<!-- ``` -->
+
+
+```{=latex}
+\begin{figure}[!htbp]
+```
+```{r echo = F, results = F, fig.height=8, fig.width=7}
+dmnd_redq  <- wqual[which(wqual$ExN50 > 1000),]
+Xredq <- dmnd_redq[,24:dim(dmnd_redq)[2]]
+summary(apply(Xredq, 1, diff_fams))
+summary(apply(dmnd[,21:dim(dmnd)[2]], 1, diff_fams))
+IQR(apply(dmnd[,21:dim(dmnd)[2]], 1, diff_fams)) - IQR(apply(Xredq, 1, diff_fams))
+
+
+dmnd_redq <- dmnd_redq[which(dmnd_redq$phylum %in% names(which(table(dmnd_redq$phylum) > 4))),]
+dmnd_redq$phylum <- factor(as.character(dmnd_redq$phylum))
+dmnd_redq$habitat <- factor(as.character(dmnd_redq$habitat))
+table(dmnd_redq$phylum) # 11 phyl
+
+Xredq <- dmnd_redq[,24:dim(dmnd_redq)[2]]
+
+
+Xredq <- Xredq[, which(apply(Xredq, 2, function(x) length(which(x > 0))/dim(Xredq)[1]) > 0.2)]
+# Xredq <- Xredq[, which(apply(Xredq, 2, max) < 1000)]
+
+
+Ximpredq <- zCompositions::multRepl(Xredq, label = 0, dl = rep(0.001, dim(Xredq)[2]), z.warning = 0.8)
+Yredq <- compositions::clr(Ximpredq)
+
+
+
+cols <- c("chocolate4", rainbow(7), viridis::viridis(3)[1:2], "orange")
+
+PCAdmndq <- prcomp(x = Yredq, scale = F)
+(pc1 <- PCAdmndq$sdev[1]^2/sum(PCAdmndq$sdev^2))
+(pc2 <- PCAdmndq$sdev[2]^2/sum(PCAdmndq$sdev^2))
+plot(-PCAdmndq$x[,1], -PCAdmndq$x[,2], type = "p", ylim = c(-15,15),
+     col = cols[as.numeric(dmnd_redq$phylum)],
+     bg = "grey90", cex = 1, lwd = 3, xlab = paste("PC1(",round(pc1,4)*100,"%)", collapse = ""),
+     ylab = paste("PC2(",round(pc2,4)*100,"%)", collapse = ""), las = 1,
+     pch = seq(4,0)[as.numeric(dmnd_redq$habitat)])
+# legend("topleft", title = "phylum", legend = levels(dmnd$phylum), pch = 19, col = rainbow(31), cex = 0.5)
+
+abline(v = 0, h = 0, lty = 2, col = "grey60")
+
+
+# suppressMessages(library(car))
+# for(i in 1:18){
+#   ellipse(center = apply(-PCAdmndq$x[which(dmnd_redq$phylum == levels(dmnd_redq$phylum)[i]),1:2], 2, mean),
+#         shape = cov(-PCAdmndq$x[which(dmnd_redq$phylum == levels(dmnd_redq$phylum)[i]),1:2]),
+#         radius =  sqrt(qchisq(0.95, df = 2)), col = c(viridis::viridis(4), rainbow(7))[i], lwd = 1.5,
+#         center.pch = F)
+# }
+# 
+# for (i in 1:18){
+#   text(x = -mean(PCAdmndq$x[which(dmnd_redq$phylum == levels(dmnd_redq$phylum)[i]),1]),
+#        y = -mean(PCAdmndq$x[which(dmnd_redq$phylum == levels(dmnd_redq$phylum)[i]),2]),
+#        labels = levels(dmnd_redq$phylum)[i],
+#        col = c(viridis::viridis(4), rainbow(7))[i], cex = 1.3)
+# }
+
+for (i in 1:length(colnames(Xred))){
+  if ((i %in% which(abs(PCAdmndq$rotation[,1]) > 0.2)) |  (i %in% which(abs(PCAdmndq$rotation[,2]) > 0.2))){
+    shape::Arrows(x0 = 0, y0 = 0, x1 = -PCAdmndq$rotation[i,1] * 28, y1 = -PCAdmndq$rotation[i,2] * 28, arr.width = 0.1, code = 2, col = "grey40", lwd = 1.5)
+    if (colnames(Xred)[i] %in% c("Virgaviridae")) {
+      text(x = -PCAdmndq$rotation[i,1] * 28 - 0.5, y = -PCAdmndq$rotation[i,2]*28 + 1.8,
+           labels = colnames(Xred)[i], cex = 1)
+      next}
+    if (colnames(Xred)[i] %in% c("Geminiviridae")) {
+      text(x = -PCAdmndq$rotation[i,1] * 28 - 0.5, y = -PCAdmndq$rotation[i,2]*28 + 1.4,
+           labels = colnames(Xred)[i], cex = 1)
+      next}
+    if (colnames(Xred)[i] %in% c("Salasmaviridae")) {
+      text(x = -PCAdmndq$rotation[i,1] * 28 - 0.5, y = -PCAdmndq$rotation[i,2]*28 - 0.6,
+           labels = colnames(Xred)[i], cex = 1)
+      next}  
+    if (colnames(Xred)[i] %in% c("Adenoviridae")) {
+      text(x = -PCAdmndq$rotation[i,1] * 28 - 0, y = -PCAdmndq$rotation[i,2]*28 - 0.8,
+           labels = colnames(Xred)[i], cex = 1)
+      next}    
+    if (colnames(Xred)[i] %in% c("Nimaviridae")) {
+      text(x = -PCAdmndq$rotation[i,1] * 28 - 0, y = -PCAdmndq$rotation[i,2]*28 - 1.8,
+           labels = colnames(Xred)[i], cex = 1)
+      next}
+    if (-PCAdmndq$rotation[i,2] > 0) text(x = -PCAdmndq$rotation[i,1] * 28, y = -PCAdmndq$rotation[i,2]*28 + 0.6,labels = colnames(Xred)[i], cex = 1)
+    else text(x = -PCAdmndq$rotation[i,1]*28, y = -PCAdmndq$rotation[i,2]*28 - 0.6,labels = colnames(Xred)[i], cex = 1)
+  }
+}
+
+legend("bottomleft", legend = levels(dmnd_redq$phylum), title = "Invertebrate phylum", cex = 0.7,
+       pch = 15, col = cols)
+legend("topleft", legend = levels(dmnd_redq$habitat), title = "Habitat", cex = 0.7,
+       pch = seq(4,1))
+
+
+```
+```{=latex}
+\caption{PCA biplot of virome compositions estimated with DIAMOND in the subset of high quality assemblies.\label{fig:pcaqual}}
+SVD was performed over the $89 \times 52$ matrix of \emph{clr} coefficients. Loadings vectors that are greater in absolute value than $0.2$ in any of the first two PC are shown. Loadings vectors are rescaled to improve their readability. Percentage of variance explained by each orthogonal PC dimension is displayed in its respective axis.
+
+\end{figure}
+
+```
+

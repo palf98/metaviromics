@@ -1,0 +1,845 @@
+# Definitive analysis
+
+```{r echo = F, results = F}
+
+
+dim(read.delim("data/db_def_con_DNA.tsv", header = T))[1] - dim(dplyr::filter(read.delim("data/db_def_con_DNA.tsv", header = T), libstrat == "RNA-Seq"))[1]
+
+dim(dplyr::filter(read.delim("data/db_def_con_DNA.tsv", header = T), libstrat == "RNA-Seq"))[1]-
+  dim(dplyr::filter(read.delim("data/db_def_con_DNA.tsv", header = T), 
+                    libstrat == "RNA-Seq", bases > 3e9))[1]
+
+length(unique(dplyr::filter(read.delim("data/db_def_con_DNA.tsv", header = T), libstrat == "RNA-Seq")$species)) -
+  length(unique(dplyr::filter(read.delim("data/db_def_con_DNA.tsv", header = T), 
+                    libstrat == "RNA-Seq", bases > 3e9)$species))
+
+
+obj <- dplyr::filter(read.delim("data/db_def_con_DNA.tsv", header = T), 
+                            libstrat == "RNA-Seq", bases > 3e9, size < 40)
+lapply(by(obj$species, INDICES = factor(obj$phylum), unique), length)
+
+
+```
+
+
+## Lessons learned from the pilot test
+
+### Avoiding sources of bias
+
+Three strategies are proposed to reduce the dataset in order to avoid biases in the data and/or to maximize the information we can obtain from a limited number of observations. Firstly, all genomic DNA or small RNA sequencing experiments are excluded from the analysis and only second generation transcriptomic sequencing experiments (RNA-Seq) are preserved. This produces a loss of `r dim(read.delim("data/db_def_con_DNA.tsv", header = T))[1] - dim(dplyr::filter(read.delim("data/db_def_con_DNA.tsv", header = T), libstrat == "RNA-Seq"))[1]` accessions and `r length(unique(read.delim("data/db_def_con_DNA.tsv", header = T)$species)) -  length(unique(dplyr::filter(read.delim("data/db_def_con_DNA.tsv", header = T), libstrat == "RNA-Seq")$species))` species.
+
+Secondly, it has been shown that estimated virome diversity is highly affected by library size, especially in the range of 0 to 3 Gb (Figure \@ref(fig:kaijudiv) D). This arbitrary delimitation (3 Gb) based on the seemingly logarithmic relationship between library size and $\alpha$-diversity tries to avoid the most critical phase of this function, while keeping the observations that lie in the more stationary part, where we assume that sequencing depth differences do not play a major role. In this trade-off situation, a more conservative delimitation would induce a more noticeable decline in the number of species and increase the average processing time per accession. This decision produces a further decrease in the number of species to `r length(unique(dplyr::filter(read.delim("data/db_def_con_DNA.tsv", header = T), libstrat %in%c("RNA-Seq", "FL-cDNA"))$species)) - length(unique(dplyr::filter(read.delim("data/db_def_con_DNA.tsv", header = T), libstrat %in%c("RNA-Seq", "FL-cDNA"), bases > 1e9)$species))` and a much sharper loss of accessions from `r dim(dplyr::filter(read.delim("data/db_def_con_DNA.tsv", header = T), libstrat %in%c("RNA-Seq", "FL-cDNA")))[1]` to just `r dim(dplyr::filter(read.delim("data/db_def_con_DNA.tsv", header = T), libstrat %in%c("RNA-Seq", "FL-cDNA"), bases > 3e9))[1]`. Moreover, accessions with an SRA file of 20 or more GB were put in a low priority because of the expected decrease in the speed of their processing and their low added information value with respect to experiments of more moderate library size. Importantly, all 32 phyla are still represented by one or more observations.
+
+Lastly, it has been noted that random sampling of accessions can result in a very uneven exploration of species. The overrepresentation of some species can bias the virome compositions that are estimated for certain phyla and underestimate the diversity of viromes within groups. In order to maximize the exploration of invertebrate viromes in the dataset while processing as few observations as possible, a single accession was randomly sampled for each unique species. However, different genera, families or orders can still be asymmetrically explored within a phylum and thus, it cannot be assumed that phyla are explored in a completely balanced way. In the end,
+`r length(unique(dplyr::filter(read.delim("data/db_def_con_DNA.tsv", header = T), libstrat == "RNA-Seq", bases > 3e9, size < 40)$species))` accessions of unique species are kept for the analysis. Since this is an objective for the long term, in this definitive analysis phyla with less than 30 observations are prioritized for a more complete analysis, while only five species are sampled from majoritary phyla, i.e. Annelida, Arthropoda, Cnidaria, Echinodermata, Nematoda, Platyhelminthes and Porifera (Table \@ref(tab:deftab)).
+
+```{r deftab, echo = F}
+df <- read.delim("data/definitivo/all_def_analysis.tsv", header = T)
+levels(df$phylum) <- c("Annelida (ANN)", "Arthropoda (ART)", "Brachiopoda (BRA)", "Bryozoa (BRY)", "Chaetognatha (CHA)", "Cnidaria (CNI)", "Ctenophora (CTE)", "Cycliophora (CYC)", "Dicyemida (DIC)", "Echinodermata (ECH)", "Entoprocta (ENT)", "Gastotricha (GAS)", "Gnathostomulida (GNA)", "Hemichordata (HEM)", "Kinorhyncha (KIN)", "Loricifera (LOR)", "Micrognathozoa (MIC)", "Mollusca (MOL)", "Nematoda (NMD)", "Nematomorpha (NMM)", "Nemertea (NME)", "Onychophora (ONY)", "Orthonectida (ORT)", "Phoronida (PHO)", "Placozoa (PLA)", "Platyhelminthes (PLT)", "Porifera (POR)", "Priapulida (PRI)", "Rotifera (ROT)", "Tardigrada (TAR)", "Urochordata (URO)", "Xenacoelomorpha (XEN)")
+
+nsp <- function(datafr, x) length(unique(datafr[,x])) # data frame and species index
+nuniq <- function(x) length(unique(x))
+
+
+spxphyl <- as.vector(by(df$species, INDICES = df$phylum, FUN = nuniq))
+total <- c("Total", length(unique(df$species)), length(unique(df$run)))
+df <- data.frame(Phylum = levels(df$phylum), Unique_species = spxphyl)
+df <- rbind(df, total)  
+
+dfbis <- cbind(rbind(df[1:16,],c("-","-","-")), df[17:33,])
+
+library(knitr)
+library(kableExtra)
+
+knitr::kable(dfbis, col.names = gsub("[_]", " ", colnames(dfbis)), align = "lclc", linesep = "", format = "latex", row.names = F,
+       caption = "Number of sampled species per phylum in the definitive analysis after avoiding sources of bias.", booktabs = T) %>%
+  kable_styling(position = "center", latex_options = c("striped","hold_position", "scale_down")) %>%
+  row_spec(16, hline_after = T)
+
+```
+
+### Pipeline election and modifications
+
+While taxonomic classification based on reads with Kaiju using the RVDB database has shown to be very fast, the use of DIAMOND for taxonomic classification of contigs on the nr database significantly slows down the pipelines. However, results of DIAMOND-related pipelines appear to minimize within-group dispersion, possibly due to a lower rate of false positives in the classification of sequences, and so, groups are separated with higher resolution. In the pilot test, sequences that did not have any viral hits were ignored and those sequences that had both host and viral hits were considered viral if the E-value was lower than the specified threshold, even if an eukaryotic or prokaryotic protein showed an even lower E-value. Since only viral hits are taken into consideration, the use of the whole nr database is not justified and only makes pipeline runtimes longer. For this definitive analysis, the nr database was restricted to only viral sequences (Viruses, taxid: 10239), greatly reducing the number of comparisons that must be made for each contig. Although VirSorter2 before DIAMOND and CAT has shown good results and was faster than DIAMOND with blastx option alone, the reduction of the nr database allowed DIAMOND blastx to be applied directly to all assembled contigs in a scalable way. Only two pipelines are maintained for the definitive analysis: *(i)* Kaiju will still be used for the low added runtime it constitutes, but now with an E-value threshold of $1e-05$ as in DIAMOND and *(ii)* DIAMOND blastx in \texttt{--very-sensitive} mode against viruses in the nr database will be used for contigs as it is expected to provide more meaningful results. An overview of this workflow is shown in Figure \@ref(fig:pipeline). However, only DIAMOND results will be presented.
+
+```{=latex}
+\begin{figure}[!htbp]
+```
+```{r pipeline, fig.align='center', echo = F}
+library(png)
+worldmap <-readPNG("_book/_main_files/pipeline.png")
+#get size
+h<-dim(worldmap)[1]
+w<-dim(worldmap)[2]
+
+par(mar=c(0,0,0,0), xpd=NA, mgp=c(0,0,0), oma=c(0,0,0,0), ann=F)
+plot.new()
+plot.window(0:1, 0:1)
+
+#fill plot with image
+usr<-par("usr")    
+rasterImage(worldmap, usr[1], usr[3], usr[2], usr[4])
+
+```
+```{=latex}
+\caption{Overview of programs used for detection of viruses in the definitive analysis. \label{fig:pipeline}}
+The global pipeline bash script and individual \emph{ad hoc} python and R scripts can be accessed in the GitHub repository of this project \href{https://github.com/palf98/metaviromics}{(https://github.com/palf98/metaviromics)}. The original collection of accessions are also provided to allow for reproducibility of methods.
+\end{figure}
+```
+
+Even if taxonomic classification of contigs has been sped up, the assembly step still requires a notable amount of time. In the part of the pipeline where reads are preprocessed, some additional steps can be used to reduce the number of reads that have to be compared in the downstream analyses. First, second generation sequencing is known to produce duplicates, i.e. the same original nucleic acid molecule is identified as two or more identical reads, for a series of reasons, which include PCR, optical and clustering artifacts. Thus, exact duplicate reads arise in NGS libraries due to the limitations of the sequencing methods. The removal of exact duplicates can lead to a loss of more than $30\%$ of the total reads, without the alteration of the accuracy in the identification of individual sequences [@Ebbert2016]. In this case, \texttt{dedupe} function of clumpify.sh, included in [BBMap toolkit](https://sourceforge.net/projects/bbmap/) [@Bushnell2014] version 38.96 was used to remove duplicate reads. For single-end reads, exact matches are considered duplicate reads, while for paired-end reads both ends have to match perfectly between multiple pairs. In both cases, one element (single or paired) of each duplicate class is preserved.
+
+Additionally, since the true host sequences are not of interest in the taxonomic classification, the assembly of their reads into contigs is something to avoid in order to improve the efficiency of the pipeline. However, reference genomes, where reads could be mapped and discarded for downstream analyses, are not available for all sampled invertebrates. Therefore, the exclusion of host transcripts has to rely on very conserved genes of invertebrates, which are used as phylogenetic markers, such as rRNA and COI mitochondrial subunits. In this context, rRNA is of special interest since its transcripts account for the majority of molecules within the whole RNA population in animal cells ($\sim80\%$). Bioinformatic ribosome depletion of transcriptomes is a common practice in RNA-Seq data analysis and its application to invertebrate datasets has led to similar levels of mRNA molecules as in poly-A enriched sequencing samples [@Kim2019]. 
+
+For this purpose, [SortMeRNA](https://github.com/biocore/sortmerna) [@Kopylova2012] (version 4.3.4) was used to filter reads that showed significant similarity to 18S and 28S rRNA subunits of eukaryotes from the default SortMeRNA rRNA database. A custom cytochrome c oxydase (COX) database including subunits of mitochondrial and nuclear genomes of different animals was used alongside rRNA databases and can be accessed in [https://github.com/palf98/metaviromics/blob/main/COI.fasta](https://github.com/palf98/metaviromics/blob/main/COI.fasta). SortMeRNA was run in \texttt{--paired-in} mode to keep strictly non-rRNA pairs of reads, i.e. pairs where one end aligned to rRNA and the other did not were excluded. Therefore, after SortMeRNA analysis step the total transcript population used is constituted predominantly by non-rRNA and non-COX transcripts. Additionally, this step sort of normalizes the libraries even if they originate from different RNA extraction and selection protocols. For instance, the percentages of viral transcripts in the pilot test could be greatly affected by the differential concentration of rRNA transcripts among samples. As a last addition to the pipeline, repair.sh program of BBMap, which tries to find the paired read for each read, was run after SortMeRNA to remove the singletons that SortMeRNA rarely produces and that corrupt the paired relationship in the fastq files.
+
+Bioinformatics methods that were not mentioned in this section were used as described in \@ref(pilot-bioinf). Statistical methods remain the same as described in \@ref(pilot-stat), with the exception of the use of Aitchison distances instead of Bray-Curtis dissimilarities for the PERMANOVA and PERMDISP tests.
+
+## Results
+
+### Pipeline results overview
+
+First of all, more than $45\%$ of the total number of reads are discarded jointly in all three preprocessing steps for all samples and in most cases, only 20 to $36\%$ of reads are preserved for subsequent analyses (Figure \@ref(fig:preprocess)). Deduplication with clumpify produces a very uneven filtering of reads between samples, ranging from almost no duplicates found to a decline of approximately $90\%$ of reads in the most extreme cases. In average, approximately $32\%$ of reads are filtered out for being exact duplicates of others. Contrary to what would be expected, the proportion of duplicates found in each sample showed no relation to its library size. So, sequencing depth did not produce a higher proportion of exact duplicates.
+
+In average, SortMeRNA produces the biggest reduction of reads among the preprocessing programs: at least half of reads remaining after deduplication are mapped to 18S or 28S eukaryotic subunits of rRNA or COX transcripts. While a further reduction of 50 to $60\%$ of reads is noted for most samples by using SortMeRNA, in some cases this reduction can be of approximately $80\%$. The concentration of rRNA in the literature is normally presented in the range of 70 to $90\%$ of the whole transcriptome. This might suggest that a portion of the rRNA transcripts were not detected and/or were already filtered out in the deduplication step. It can also be inferred from these results that neither experimental ribosome depletion nor poly-A selection were performed over these datasets, *ergo* it can be assumed that the whole RNA population was surveyed in each sample. 
+
+In the case of Trimmomatic, normally more than $90\%$ of reads have sufficient overall quality scores to be preserved. Although a noticeable global reduction of reads is achieved in the preprocessing steps, *de novo* assembly of contigs with Trinity still uses an important amount of computational resources and time (Figure \@ref(fig:pipelinetimes) A).
+
+As for the assembly, the median assembly gathers information from around $80\%$ of final reads after preprocessing, although there is high variability among samples (Figure \@ref(fig:assemblystats) A). This proportion of mapped reads is positively related to the E90N50 criterion for quality of assemblies (Figure \@ref(fig:assemblystats) B): assemblies where a low proportion of reads are represented in the contigs tend to form assemblies formed by short contigs and thus, have lower quality. For accessions with a percentage of mapped reads below $60$ to $70\%$, E90N50 statistics are mostly below 1000 bp. Also, the median number of distinct transcripts that account for $90\%$ of expression within the assemblies was 25.500, which is lower than that reported in the pilot test. A decrease was not expected after removing superabundant rRNA and mitochondrial transcripts in the preprocessing.
+
+Reported E90N50 values in the definitive analysis are similar to those seen in the pilot test, although the sampled accessions now belong to sequencing experiments with larger library sizes. In average, obtained assemblies have E90N50 statistics of 1377 bp and $38\%$ of assemblies do not reach an E90N50 of 1000, which is the minimum reported in the literature for *de novo* assemblies of invertebrate transcriptomes (\@ref(e90n50pilot)). The cause of these insufficient contig lengths in roughly a third of the samples is unknown, but some associations can be made apart from that with the percentage of mapped reads. First, some phyla are associated with increases or decreases of E90N50 (Figure \@ref(fig:assemblystats) C). For instance, almost all Onychophora assemblies show E90N50 lower than 500 bp, while observations of Echinodermata and Placozoa are usually above 2500 bp. It was checked that this was not due to a collinearity between phyla and library sizes, therefore other determinants of biological or experimental origin have to differ among phyla to explain this association.
+
+```{=latex}
+\begin{figure}[!htbp]
+```
+```{r echo = F, results = F, fig.height = 6}
+
+nreads <- read.csv("data/definitivo/nreads/todos.csv")
+
+# proportion of remaining reads after each preprocessing step
+nreads$prop.clumpi <- nreads$clumpify.output.reads/nreads$clumpify.input.reads # porcentaje de no duplicados
+nreads$prop.sortme <- nreads$Trimmomatic.input.reads/nreads$clumpify.output.reads
+nreads$prop.trimmo <- nreads$Trimmomatic.output.reads/nreads$Trimmomatic.input.reads
+nreads$prop.global <- nreads$Trimmomatic.output.reads/nreads$clumpify.input.reads
+
+
+dmnd <- read.csv("data/definitivo/tablas/diamond_conjunto_tpm.csv", header = T, sep = ",")
+df <- read.delim("data/db_def_solo_RNA.tsv", header = T)[,-20]
+dmnd <- cbind(dplyr::filter(df, run %in% dmnd$accession)[order(dplyr::filter(df, run %in% dmnd$accession)$run),], dmnd[order(dmnd$accession),1:dim(dmnd)[2]])
+
+ncontigs <- read.delim("data/definitivo/ncontigs.txt", header = T, sep = ",")
+E90N50 <- read.delim("data/definitivo/E90N50stat.txt", header = T)
+pipeline_control <- merge(x = ncontigs, y = nreads, by = "acc")
+pipeline_control <- na.omit(pipeline_control)
+pipeline_control <- merge(pipeline_control, E90N50, by = "acc")
+
+par(mfrow= c(2,2))
+par(mar = c(4,4,2,1))
+#### Clumpi ####
+plot(pipeline_control$prop.clumpi, pipeline_control$ExN50,
+     main = "A                                                  ", 
+     xlab = "Proportion of reads preserved (Clumpify)", ylab = "E90N50 (bp)")
+summary(modc <- lm(ExN50 ~ prop.clumpi, data = pipeline_control))
+lines(seq(0,1,by=0.05), seq(0,1,by=0.05)*coef(modc)[2])
+text(x = 0.24, y = 3000, labels = "P < 0.05")
+cor(x = pipeline_control$prop.clumpi, y = pipeline_control$ExN50)
+text(x = 0.24, y = 2600, labels = expression(paste(rho, " = 0.551")))
+
+#### SortMeRNA ####
+plot(pipeline_control$prop.sortme, pipeline_control$ExN50,
+     main = "B                                                  ", 
+     xlab = "Proportion of reads preserved (SortMeRNA)", ylab = "E90N50 (bp)")
+summary(mods <- lm(ExN50 ~ prop.sortme, data = pipeline_control))
+lines(seq(0,1,by=0.05), coef(mods)[1] + seq(0,1,by=0.05)*coef(mods)[2])
+cor(x = pipeline_control$prop.sortme, y = pipeline_control$ExN50)
+text(x = 0.17, y = 3000, labels = expression(paste(rho, " = 0.035")))
+
+#### TRIMMO ####
+plot(pipeline_control$prop.trimmo, pipeline_control$ExN50,
+     main = "C                                                  ", 
+     xlab = "Proportion of reads preserved (Trimmomatic)", ylab = "E90N50 (bp)")
+summary(modt <- lm(ExN50 ~ prop.trimmo, data = pipeline_control))
+lines(seq(0,1,by=0.05), coef(modt)[1] + seq(0,1,by=0.05)*coef(modt)[2])
+cor(x = pipeline_control$prop.trimmo, y = pipeline_control$ExN50)
+text(x = 0.22, y = 3000, labels = expression(paste(rho, " = 0.012")))
+
+
+#### GLOBAL ####
+plot(pipeline_control$prop.global, pipeline_control$ExN50,
+     main = "D                                                  ", 
+     xlab = "Proportion of reads preserved (Global)", ylab = "E90N50 (bp)")
+summary(modg <- lm(ExN50 ~ prop.global, data = pipeline_control))
+lines(seq(0,1,by=0.05), seq(0,1,by=0.05)*coef(modg)[2])
+text(x = 0.08, y = 3000, labels = "P < 0.05")
+cor(x = pipeline_control$prop.global, y = pipeline_control$ExN50)
+text(x = 0.08, y = 2600, labels = expression(paste(rho, " = 0.475")))
+
+
+pipeline_control <- merge(pipeline_control, dmnd[,2:20], by.x = "acc", by.y = "run")
+
+summary(lm(pipeline_control$ExN50 ~ pipeline_control$prop.clumpi + pipeline_control$phylum + 
+             I(pipeline_control$n.mapped.reads/pipeline_control$Trimmomatic.output.reads)))
+# summary(lm(pipeline_control$ExN50 ~ pipeline_control$prop.clumpi + pipeline_control$phylum + 
+#              I(pipeline_control$n.mapped.reads/pipeline_control$Trimmomatic.output.reads) + pipeline_control$bases))
+
+
+```
+```{=latex}
+\caption{Effect of the removal of reads after each preprocessing step on the quality of assembled contigs.\label{fig:preprassembly}}
+For each program in the preprocessing, the number of reads left in the output was divided by the number of input reads. Programs were used in the order of the pipeline: SortMeRNA operates with Clumpify's output and Trimmomatic with SortMeRNA's. $P < 0.05$ is displayed if the simple linear model with E90N50 (a quality metric for transcriptomic assemblies) as response had a significant regression parameter associated to the proportion of preserved reads. The relationship between variables could be more complex than simple linearity, since best fitting models were not exhaustively explored. $\rho$ indicates the Pearson linear correlation coefficient between both variables. \textbf{A. } Filtering of reads with Clumpify is negatively related to the quality of the assemblies. Furthermore, Clumpify seems to drive the association in \textbf{D.}, which shows that the global filtering of reads in the whole preprocessing has a weaker linear correlation with E90N50 values. Removal of rRNA and COX transcripts (\textbf{B.}) and low quality reads (\textbf{C.}) does not seem to have an effect on E90N50.
+
+\end{figure}
+
+```
+
+
+Also, the proportion of reads that are removed by Clumpify seems to have an effect on the outcome of assemblies. The more reads are preserved after the deduplication step with Clumpify in a sample, the higher the E90N50 statistic for that sample (Figure \@ref(fig:preprassembly) A). However, there is no evidence to affirm that this is a causal relationship, even if Clumpify operates upstream of Trinity, and the real cause or causes might affect simultaneously all these variables that correlate to each other. Read removal by SortMeRNA and Trimmomatic does not seem to significantly affect the length of the resulting contigs after Trinity (Figure \@ref(fig:preprassembly) B, C). Therefore, it is the specific removal of reads by Clumpify that induces this variation in the assembly quality, also because the correlation in Figure \@ref(fig:preprassembly) A is higher than in the global reduction of reads (Figure \@ref(fig:preprassembly) D). This is surprising, since especially the removal of reads that is achieved with Clumpify, i.e. deduplication, should preserve one read for each group of equivalent reads. Duplicates do not provide any additional information to the assembly, since there is complete sequence overlap with its equivalent reads and therefore, their exclusion should theoretically not affect neither the length nor the number of assembled contigs.
+
+In all, $78\%$ of the variation in the reported E90N50 values ($R^2adj = 0.74$) could be explained in a linear model with three variables: phylum affiliation, the percentage of reads mapped into contigs and the proportion of preserved reads after Clumpify. All three covariates have significant regression parameters in the model, which indicates that all three are able to provide unique information to reconstruct the distribution of E90N50 values.
+
+
+### DIAMOND taxonomic classification results
+
+```{r functions, echo = F, results = F}
+pairwise.adonis <- function(x,factors, sim.function = 'vegdist', sim.method = 'bray', p.adjust.m ='bonferroni') {
+library(vegan)
+
+co = combn(unique(as.character(factors)),2)
+pairs = c()
+F.Model =c()
+R2 = c()
+p.value = c()
+
+
+for(elem in 1:ncol(co)){
+if(sim.function == 'daisy'){
+library(cluster); x1 = daisy(x[factors %in% c(co[1,elem],co[2,elem]),],metric=sim.method)
+} else{x1 = vegdist(x[factors %in% c(co[1,elem],co[2,elem]),],method=sim.method)}
+
+ad = adonis(x1 ~ factors[factors %in% c(co[1,elem],co[2,elem])] );
+pairs = c(pairs,paste(co[1,elem],'vs',co[2,elem]));
+F.Model =c(F.Model,ad$aov.tab[1,4]);
+R2 = c(R2,ad$aov.tab[1,5]);
+p.value = c(p.value,ad$aov.tab[1,6])
+}
+p.adjusted = p.adjust(p.value,method=p.adjust.m)
+sig = c(rep('',length(p.adjusted)))
+sig[p.adjusted <= 0.05] <-'.'
+sig[p.adjusted <= 0.01] <-'*'
+sig[p.adjusted <= 0.001] <-'**'
+sig[p.adjusted <= 0.0001] <-'***'
+
+pairw.res = data.frame(pairs,F.Model,R2,p.value,p.adjusted,sig)
+print("Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1")
+return(pairw.res)
+
+} 
+AIC.PERMANOVA <- function(adonis.model) {
+    
+    # check to see if object is an adonis model...
+    
+    if (!(adonis.model$aov.tab[1,1] >= 1))
+        stop("object not output of adonis {vegan} ")
+    
+    # Ok, now extract appropriate terms from the adonis model
+    # Calculating AICc using residual sum of squares (RSS) since I don't think that adonis returns something I can use as a liklihood function...
+    
+    RSS <- adonis.model$aov.tab[rownames(adonis.model$aov.tab) == "Residuals", "SumsOfSqs"]
+    MSE <- adonis.model$aov.tab[rownames(adonis.model$aov.tab) == "Residuals", "MeanSqs"]
+    
+    k <- ncol(adonis.model$model.matrix)# + 1 # add one for error variance
+    
+    nn <- nrow(adonis.model$model.matrix)
+    
+    # AIC : 2*k + n*ln(RSS)
+    # AICc: AIC + [2k(k+1)]/(n-k-1)
+
+    # based on https://en.wikipedia.org/wiki/Akaike_information_criterion;
+    # https://www.researchgate.net/post/What_is_the_AIC_formula;
+    # http://avesbiodiv.mncn.csic.es/estadistica/ejemploaic.pdf
+    
+    # AIC.g is generalized version of AIC = 2k + n [Ln( 2(pi) RSS/n ) + 1]
+    # AIC.pi = k + n [Ln( 2(pi) RSS/(n-k) ) +1],
+    
+    AIC <- 2*k + nn*log(RSS)
+    AIC.g <- 2*k + nn * (1 + log( 2 * pi * RSS / nn))
+    AIC.MSE <- 2*k + nn * log(MSE)
+    AIC.pi <- k + nn*(1 + log( 2*pi*RSS/(nn-k) )   )
+    AICc <- AIC + (2*k*(k + 1))/(nn - k - 1)
+    AICc.MSE <- AIC.MSE + (2*k*(k + 1))/(nn - k - 1)
+    AICc.pi <- AIC.pi + (2*k*(k + 1))/(nn - k - 1)
+    
+    output <- list("AIC" = AIC, "AIC.g" = AIC.g, "AICc" = AICc,
+                   "AIC.MSE" = AIC.MSE, "AICc.MSE" = AICc.MSE,
+                   "AIC.pi" = AIC.pi, "AICc.pi" = AICc.pi, "k" = k)
+    return(output)   
+}
+diff_fams <- function(comp.vec){
+  length(comp.vec[which(comp.vec > 0)])
+}
+shannon <- function(comp.vec){
+  obj <- t(comp.vec / sum(comp.vec) * log(comp.vec / sum(comp.vec)))
+  obj[is.nan(obj)] <- 0
+  return(-1 * sum(obj))
+}
+```
+
+```{r dmndload, echo = F, results = F}
+par(mfrow = c(1,2))
+dmnd <- read.csv("data/definitivo/tablas/diamond_conjunto_tpm.csv", header = T, sep = ",")
+df <- read.delim("data/db_def_solo_RNA.tsv", header = T)[,-20]
+dmnd <- cbind(dplyr::filter(df, run %in% dmnd$accession)[order(dplyr::filter(df, run %in% dmnd$accession)$run),], dmnd[order(dmnd$accession),1:dim(dmnd)[2]])
+dmnd$bases <- dmnd$bases/1e9
+
+cbind(dmnd$accession, dmnd$run) # bien emparejado
+
+table(dmnd$phylum)
+
+dmnd$habitat <- factor(dmnd$habitat)
+dmnd$phylum <- factor(dmnd$phylum)
+
+levels(dmnd$phylum) <- c("ANN", "ART", "BRA", "BRY", "CHA", "CNI", "CTE", "CYC", "DIC", "ECH", "ENT", "GAS", "GNA", "HEM", "KIN", "LOR", "MOL", "NMD", "NMM", "NME", "ONY", "ORT", "PHO", "PLA", "PLT", "POR", "PRI", "ROT", "TAR", "URO", "XEN")
+
+
+
+
+
+quals <- read.delim("data/definitivo/E90N50stat_todos.txt", header = T)
+colnames(quals)[1] = "run"
+obj <- merge(quals, dmnd, by = "run")
+summary(obj$ExN50)
+# boxplot(obj$ExN50 ~ obj$phylum) muchos nombres
+  
+```
+
+#### Description and univariate analysis of diversity
+
+Twelve accessions were lost due to errors in the pipeline, probably because the raw sequence files were corrupted, leading to the loss of the only representative in Micrognathozoa phylum, one accession in Brachiopoda, one in Bryozoa, six in Ctenophora, one in Cycliophora and two in Mollusca. In total, 209 observations for 31 phyla remain. Marine (125) and terrestrial (50) habitats are the most prevalent, followed by freshwater habitat with 21 observations. For invertebrates of intertidal zone, 11 viromes have been estimated. Lastly, two observations have been sampled for brackish habitat, both related to mollusks. Again, a significant degree of collinearity is to be expected between phylum and habitat factors (Figure \@ref(fig:habitatdivdef)).
+
+```{=latex}
+\begin{figure}[!htbp]
+```
+```{r echo = F, results = F, fig.width=8}
+T1 <- as.data.frame(table(dmnd$habitat, dmnd$phylum))
+colnames(T1) <- c("Habitat", "Phylum", "Frequency")
+
+plot1 <- ggplot(T1,aes(x=Phylum,y=Frequency,fill=Habitat)) + geom_col(width=0.3) +  
+  theme_bw() + ylab("Sampled accessions") + 
+  theme(legend.position="bottom",
+        axis.text=element_text(size=7)) 
+plot1
+```
+```{=latex}
+\caption{Distribution of habitats within phyla.\label{fig:habitatdivdef}}
+The sampled accessions of 21 out of 31 phyla are exclusively marine. Sampled arthropods, nematodes and onychophores are exclusively terrestrial and Rotifera harbors only freshwater samples. Habitat diversity is only observed within six phyla, with annelids, bryozoans and mollusks being the phyla with greater habitat variability. The unbalance in the exploration depth of the different phyla is also noticeable in the figure.
+
+
+\end{figure}
+
+```
+
+After taxonomic classification of contigs, 124 different viral families were found at least once. Non-null virome compositions were reported for all processed accessions and in average $12\%$ of total non-rRNA, non-COX transcript expression was classified as viral. Between $6\%$ and $18\%$ of viral transcripts were found for more than $50\%$ of accessions, always with respect to the defined subset of the transcriptome. In the pilot test, DIAMOND analysis found approximately $0.1\%$ of viral transcripts over the whole transcriptome. An increase was expected due to the removal of non-viral sequences in the preprocessing. However, a 120-fold increase cannot be explained just by the exclusion of non-viral reads in the preprocessing, since the total of reads is reduced to about only a fourth of its original size and Clumpify and Trimmomatic are not assumed beforehand to enrich the subsets in viral reads. In other studies, the concentration of viral RNA with respect to the total non-rRNA transcriptome was seen to be more variable and to greatly vary between invertebrate phyla in a range between nearly 0 and almost $90\%$ [@Shi2016]. The concentration of viral transcripts positively correlates with the E90N50 quality criterion of assemblies (Figure \@ref(fig:virqual)) and thus, to the proportion of mapped reads due to their reciprocal correlation. However, $\alpha$-diversity does not seem to be affected by E90N50.
+
+
+```{=latex}
+\begin{figure}[!htbp]
+```
+```{r univariate, echo = F, results = F, , fig.height= 8, fig.width=10}
+
+X <- dmnd[,21:dim(dmnd)[2]]
+which(apply(X, 1, sum) == 0)
+summary(apply(X, 1, sum))
+
+
+par(mfrow = c(2,1))
+par(mar = c(4,4,3,0))
+par(cex.axis = 0.7)
+boxplot(apply(X, 1, diff_fams) ~ dmnd$phylum,
+        xlab = "Invertebrate phylum", ylab = expression(paste(alpha, "-diversity (F)")),
+        pch = 16, outcol = "dodgerblue", cex = 1.2, las = 1, 
+        main = "A                                                                                                                                                            ")
+abline(h = seq(25,75, by = 10), lty = 3, col = "grey60")
+abline(h = seq(30,70, by = 10), lty = 3, col = "grey60", lwd = 2)
+
+boxplot(apply(X, 1, diff_fams) ~ dmnd$phylum, col = "dodgerblue", cex = 1.2, add = T, xaxt = "n", yaxt = "n")
+
+boxplot(apply(X, 1, shannon) ~ dmnd$phylum, pch = 16, outcol = "dodgerblue",
+        xlab = "Invertebrate phylum", ylab = "Shannon diversity index (H')", las = 1, cex = 1.2,
+        main = "B                                                                                                                                                            ")
+abline(h = seq(1.5,2.5,by = 0.5), lty = 3, col = "grey60", lwd = 2)
+boxplot(apply(X, 1, shannon) ~ dmnd$phylum, add = T, col = "dodgerblue", xaxt = "n", yaxt = "n", cex = 1.2)
+
+```
+```{=latex}
+\caption{Univariate diversity and abundance metrics for DIAMOND results.\label{fig:defdmnddiver}}
+\textbf{A.} Families richness reported per sample across the different phyla in alphabetical order. \textbf{B.} Distribution of Shannon diversity indices per observation in all sampled phyla. The behavior of both metrics is similar. The observed number of distinct families typically ranges between 40 and 55 viral families per invertebrate sample and most Shannon diversity indices oscillate around $2.5$.
+
+
+\end{figure}
+
+```
+
+In relation to the identified viral families and their diversity, around 46 viral families were found per sample on average. In all cases, 25 or more viral families were identified for each single observation (Figure \@ref(fig:defdmnddiver) A). This is a significant increase in $\alpha$-diversity with regards to what was observed both for Kaiju and DIAMOND in the pilot test. Also, $H^\prime$ values are now higher and oscillate around $2.5$ (Figure \@ref(fig:defdmnddiver) B) in contrast to the values between $1.5$ and 2 that were seen in the pilot test. Therefore, sufficient evenness has to continue to exist between the abundances of families to achieve an increase in $H^\prime$ through the identification of more viral families. In summary, it seems that the viral sequences that are found with this combination of programs are more abundant and diverse.
+
+As for the individual viral families, those with the highest relative abundances are predominantly families of dsDNA viruses. In average, transcripts of family *Mimiviridae* represent $20.1\%$ of the viromes. Other highly abundant families include *Siphoviridae* ($15.0\%$), *Myoviridae* ($7.7\%$), *Phycodnaviridae* ($5.2%$), *Poxviridae* ($4.8\%$), *Baculoviridae* ($3.0\%$), etc. Retroviruses represent $4.1\%$ of viral RNA and the most abundant RNA viral families found are *Flaviviridae* and *Reoviridae*, with average relative abundances of $1.5\%$ and $0.8\%$, respectively. $18.9\%$ of estimated viral transcripts belong to viruses of uncertain family. Again, the viromes associated with the invertebrate samples are dominated by viruses of protists ($>30\%$) and bacteria ($>27\%$). As many as 54 viral families were found in $20\%$ or more of the accessions and 15 of them (apart from unclassified viruses) are found in all samples, including most of the above mentioned families.
+
+
+```{r echo = F, results = F}
+X <- t(apply(X, 1, function(x) x/sum(x))) # conversion to relative abundances
+round(sort(apply(X, 2, mean)* 100), 2)
+
+
+X <- X[, which(apply(X, 2, function(x) length(which(x > 0))/dim(X)[1]) > 0.8)] # porcentajes de 0 por familia
+dim(X)
+```
+
+#### Virome composition analysis
+
+In this section, phyla with less than five observations were excluded, since within-group variation is not well enough explored in these groups. Still, the distribution of the remaining 181 observations among the 18 phyla left is fairly unequal. First, a dimensionality reduction in the features, i.e. the viral families, was performed based on their frequency of zero values: those 70 families with $80\%$ or more null cells along the compositions were excluded.
+
+Like in the pilot test, a selection of PERMANOVA models based on the minimization of AIC was performed using the Aitchison distances. Again, the model with the greatest goodness of fit was the model that included phylum grouping ($AIC = 2057.1$) and the addition of the habitat factor as an additive ($AIC = 2058.5$) or multiplicative ($AIC = 2062.9$) term showed no significant association with differences in location or dispersion that weren't already explained by phylum. In a one-way PERMANOVA model, habitat factor ($AIC = 2071.8$) supported rejection of $H_0$ and was able to explain almost $7\%$ of the variance in the 181 observations with only five categories. The more informative one-way model using phylum factor was able to explain up to $26\%$ of the total variance, similar to what was reported in the pilot test (\@ref(permapilot)). 
+
+In PERMDISP testing, the hypothesis that within-group dispersions are homogeneous ($H_0$) for the model with phylum factor was rejected at $\alpha = 0.05$. In post-hoc Tukey test, Xenacoelomorpha was the phylum with the larger distances to its centroid, while chaetognaths had the most consistently similar viromes (\@ref(fig:boxplotdisp)). Xenacoelomorphs are formed by three distinct clades that were historically not related under the same phylum: acoels, nematomorphs and xenoturbellids. Recent phylogenetic studies have led to their union under the same phylum, although they have important morphological differences [@Cannon2016]. This could explain why the compositions of their viromes are so variable, even if they all share the same marine habitat. Chaetognatha is also a phylum of exclusively marine organisms. However, chaetognaths are predominantly found in the zooplankton of warm coastal waters, which poses a restriction with respect to the vast marine habitat. 
+
+In contrast, zooplankton species of Ctenophora phylum are notably abundant in a wide range of oceanic habitats. Alongside their phylogenetic diversity [@Christianson2022], this could be the cause of the greater variation of their viromes. Also, viromes of mollusks were approximately as diverse as in ctenophores. Mollusks are greatly diverse in our categorization of phyla, which could certainly lead to the association to different microbiomes and viromes in each of these habitats. The viral diversity in arthropods is most likely underestimated, since all five sampled species belong to the same class (Arachnida). Apparently, assembly quality is not associated with an increase nor a decrease in virome variability, since Onychophora and Mollusca, which are deeply sampled phyla rich in accessions with low E90N50, do not have a particularly similar nor outlying behavior.
+
+```{=latex}
+\begin{figure}[!htbp]
+```
+```{r echo = F, results = F, fig.height=6, fig.width = 8}
+library(vegan)
+
+dmnd_red <- dmnd[which(dmnd$phylum %in% names(which(table(dmnd$phylum) > 4))),]
+
+dmnd_red$phylum <- factor(as.character(dmnd_red$phylum))
+dmnd_red$habitat <- factor(as.character(dmnd_red$habitat))
+
+table(dmnd_red$phylum)
+Xred <- dmnd_red[,21:dim(dmnd_red)[2]]
+Xred <- Xred[, which(apply(Xred, 2, function(x) length(which(x > 0))/dim(Xred)[1]) > 0.2)]
+
+Ximpred <- zCompositions::multRepl(Xred, label = 0, dl = rep(0.001, dim(Xred)[2]), z.warning = 0.8)
+# zCompositions::zPatterns(Xred, label = 0)
+Yred <- compositions::clr(Ximpred)
+
+mod1 <- vegan::adonis(Yred ~ dmnd_red$phylum, method = "euclidean", permutations = 2000)
+mod1$aov.tab
+AIC.PERMANOVA(mod1)$AIC
+anova(vegan::betadisper(dist(Yred, method = "euclidean"), group = dmnd_red$phylum, bias.adjust = T))
+# TukeyHSD(vegan::betadisper(dist(Yred, method = "euclidean"), group = dmnd_red$phylum))
+# as.factor(c("abc", "ab", "ab", "ab", "a", "abc", "bc", "ab", "bc", "abc", "ab", "ab", "abc", "abc", "ab", "abc", "abc", "c"))
+
+par(mar = c(4,4,2,1))
+boxplot(vegan::betadisper(dist(Yred, method = "euclidean"), group = dmnd_red$phylum),
+        col = c("skyblue", "dodgerblue", "grey", "orange", "tomato")[as.numeric(as.factor(c("abc", "ab", "ab", "ab", "a", "abc", "bc", "ab", "bc", "abc", "ab", "ab", "abc", "abc", "ab", "abc", "abc", "c")))],
+        outcol = c("skyblue", "dodgerblue", "grey", "orange", "tomato")[as.numeric(as.factor(c("abc", "ab", "ab", "ab", "a", "abc", "bc", "ab", "bc", "abc", "ab", "ab", "abc", "abc", "ab", "abc", "abc", "c")))],
+        pch = 16, cex.axis = 0.6, cex = 1.2, xlab = "Invertebrate phylum", ylab = "Distance to centroid in PCo1-PCo2 space")
+abline(h = seq(0,40, by = 10), lty = 3, lwd = 2, col = "grey60")
+abline(h = seq(5,45, by = 10), lty = 3, lwd = 1, col = "grey60")
+
+boxplot(vegan::betadisper(dist(Yred, method = "euclidean"), group = dmnd_red$phylum),
+        col = c("skyblue", "dodgerblue", "grey", "orange", "tomato")[as.numeric(as.factor(c("abc", "ab", "ab", "ab", "a", "abc", "bc", "ab", "bc", "abc", "ab", "ab", "abc", "abc", "ab", "abc", "abc", "c")))],
+        pch = 1, xaxt = "n", yaxt = "n", cex = 1.2, add = T)
+legend("topleft", legend = c("a", "ab", "abc", "bc", "c"), pch = 15, col = c("skyblue", "dodgerblue", "grey", "orange", "tomato"), title = "TukeyHSD grouping", bg = "white", cex = 0.8)
+
+```
+```{=latex}
+\caption{Distribution of the distances to the centroid in each phylum in the space of PCo1 and PCo2.\label{fig:boxplotdisp}}
+Groups of phyla by dispersion were determined with the \emph{post hoc} Tukey test over the PERMDISP model with phylum factor. When the $95\%$ confidence interval for the difference of the mean distances to the centroid between two phyla excludes 0, then those phyla belong to separate groups. This is computed for all pairwise combinations of phyla. Uncertainty in phyla with low sample size does not allow to establish significant differences to other groups, placing them in the ambigous group 'abc', where no differences are found to any phylum.
+
+\end{figure}
+
+```
+
+PERMDISP analysis using the habitat factor over this dataset showed no significant differences in the variation of viromes between habitats. Here, the inclusion of a category with only two individuals (Brackish) required the test to be more conservative in the rejection of $H_0$ because of the insufficient exploration of the dispersion in that particular group. Based on the results in both tests, it can be assumed that any differences between the viromes of the different habitats exist and their within-group variations are homogeneous. After PCoA, the representation of all observations in the space of PCo1 and PCo2 shows an intuitive layout of the habitat centroids: viromes of intertidal zone invertebrates share characteristics with terrestrial and marine viromes, while brackish viromes are more similar to marine and freshwater viromes (\@ref(fig:habpcoa)). This is coherent with the definition of these two transition habitats. On average, freshwater viromes are the most dissimilar from the rest, which could be an artifact due to the high relative frequency of Rotifera phylum observations, although three additional phyla have this habitat assigned. However, the degree of overlap between the data range of each group is very notable.
+
+Moving back to the phylum grouping, it has been seen that dispersions most likely are heterogeneous among groups. However, it has not been shown whether or not locations differ. This time, PCA results were represented in a figure where centroids per phylum for PC1 and PC2 were drawn (Figure \@ref(fig:dmndbiplot)). In order to illustrate the variability of each group in this bidimensional space, $95\%$ confidence interval ellipses were computed from the covariance matrix for PC1 and PC2 restricted to each phylum. Even if observations are not represented, the resulting biplot-derived figure is considerably dense. Nevertheless, the outstanding virome composition variability of xenacoelomorphs and mollusks can be appreciated in their confidence interval ellipses. As to the locations, most ellipses show overlap with the rest. 
+
+For its low variation in PC2, viromes of arthropods appear to be significantly different to viromes of rotifers, tardigrades, nematodes, ctenophores, platyhelminths, sponges (Porifera) and bryozoans. For the same reason, nematodes are separate to onychophores, echinoderms and arthropods, whose centroids are located very nearly. Anyway, nematodes as well as arthopods have small sample sizes, and their variations in PC2 could be underestimated. In the pilot test, viromes of the sampled nematodes and arthropods seemed to be not so divergent (Figures \@ref(fig:sample50pcoakaiju) and \@ref(fig:sample50pcacat)). Also, it seems that the position of terrestrial observations in Figure \@ref(fig:habpcoa) is biased towards the cluster formed by onychophores and arthropods, while tardigrades and nematodes tend to fall between the regions that were considered marine and freshwater. This is likely to be caused by the large number of species analyzed for onychopohores (Figure \@ref(fig:habitatdivdef)).
+
+PC3 explained $7.5\%$ of the variation, which is quantitatively similar to PC1 and PC2. This is indicative of low collinearity between the behavior of the different viral families. Its representation against PC1 or PC2 did not improve the resolution in the segregation of phyla.
+
+As for the contribution of the different viral families to PC1 and PC2, the majority of the most influential families were not identified as such in the pilot test. A high concentration of *Pseudoviridae*, *Adintoviridae* and *Caulimoviridae* transcripts contributes to positive values in PC1. None of these families have confirmed members that infect ctenophores or xenacoelomorphs, which have the most positive values in PC1, but pseudoviruses are known to infect both fungi and invertebrates and adintoviruses have been found associated to cnidarians [@Starrett2021]. Caulimoviruses and especially, potyviruses, which also has a positive effect on PC2, are viruses of plants that also favor positive locations on PC1. As an hypothesis, potyviruses could be found in the phytoplankton associated with the individuals of Xenacoelomorpha and Ctenophora phyla. However, current evidence supports that potyviruses are mainly related to terrestrial plants and insect vectors and their presence in marine habitats is residual if any [@Culley2003; @Gibbs2008].
+
+Mitoviruses (mitochondria and bacteria serve as host), apart from potyviruses, positively contribute to PC2, while many other families are negatively related to this dimension: *Adenoviridae* (animals), *Caulimoviridae* (plants), *Nimaviridae* (marine arthropods), *Virgaviridae* (plants), *Chrysoviridae* (fungi), *Malacoherpesviridae* (mollusks), *Adintoviridae* (invertebrates), *Salasmaviridae* (bacteria), etc. This group of viruses is very diverse in host range. With respect to genome structure, mitoviruses and potyviruses have RNA-based genomes, while among the families that contribute negatively to PC2 only *Virgaviridae* and *Chrysoviridae* belong to RNA classes of viruses. This coordinate opposes tardigrades and nematodes to onychophores, arthropods and echinoderms, whose viromes are enriched in the viral families associated with negative values of PC2. 
+
+Rotifera is consistently the phylum found in more negative values of PC1. From the most influential loading vectors, it can be inferred that transcripts of family *Bicaudaviridae* are especially abundant in this phylum, while the contrary occurs with *Pseudoviridae* sequences. Bicaudaviruses are found in hyperthermophilic archaea and, while it is unlikely that rotifers have been sampled from these environments, other related viruses of archaea could have been detected.
+
+In general, the absence of the most overall abundant viral families is notable in the families that influence the PCA the most. Apparently, those abundant families do not introduce sufficient compositional variation between observations and are found in relatively consistent concentrations in the viromes of all phyla and habitats. Therefore, the most abundant families on average, can also be considered the most stable and ubiquitous. However, the minor viral families are able to cause the mild separation of observations in the PCA.
+
+```{r pairwise, echo = F, results = F}
+# 
+# nphyl <- length(levels(dmnd_red$phylum))
+# 
+# matriz <- matrix(nrow = nphyl, ncol = nphyl)
+# 
+# colnames(matriz) <- levels(dmnd_red$phylum)
+# rownames(matriz) <- colnames(matriz)
+# 
+# # para cada phylum
+# for (i in 1:nphyl){
+#   for (j in 1:nphyl){
+#     if (i == j){
+#       matriz[i,j] = "D"
+#       next
+#     }
+#     else {
+#       print(rownames(matriz)[c(i,j)])
+#       subsetY <- Yred[which(dmnd_red$phylum %in% rownames(matriz)[c(i,j)] )]
+#       fdr <- as.numeric(p.adjust(
+#         adonis(subsetY ~ dplyr::filter(dmnd_red, phylum %in% rownames(matriz)[c(i,j)])$phylum, method = "euclidean"
+#                , permutations = 3000)$aov.tab$`Pr(>F)`[1], "fdr", n = (nphyl^2 - nphyl)/2))
+#       print(fdr)
+#       fdrp <- as.numeric(p.adjust(
+#         anova(betadisper(vegdist(subsetY, "euclidean"), group = dplyr::filter(dmnd_red, phylum %in% rownames(matriz)[c(i,j)])$phylum, bias.adjust = F))$`Pr(>F)`[1], "fdr", n = (nphyl^2 - nphyl)/2))
+#       if (fdr < 0.05 & fdrp > 0.05) matriz[i,j] = "A"
+#       if (fdr < 0.05 & fdrp < 0.05) matriz[i,j] = "B"
+#       if (fdr > 0.05 & fdrp < 0.05) matriz[i,j] = "C"
+#       if (fdr > 0.05 & fdrp > 0.05) matriz[i,j] = "D"
+#     }
+#   }
+# }
+# 
+# View(matriz)
+```
+
+```{=latex}
+\begin{figure}[!htbp]
+```
+```{r echo = F, results = F, fig.height=7, fig.width=8}
+PCAdmnd <- prcomp(x = Yred, scale = F)
+(pc1 <- PCAdmnd$sdev[1]^2/sum(PCAdmnd$sdev^2))
+(pc2 <- PCAdmnd$sdev[2]^2/sum(PCAdmnd$sdev^2))
+plot(PCAdmnd$x[,1], PCAdmnd$x[,2], type = "n",
+     col = c(viridis::viridis(8), rainbow(10))[as.numeric(dmnd_red$phylum)],
+     bg = "grey90", cex = 1, lwd = 3, xlab = paste("PC1(",round(pc1,4)*100,"%)", collapse = ""), 
+     ylab = paste("PC2(",round(pc2,4)*100,"%)", collapse = ""), las = 1, 
+     pch = seq(4,0)[as.numeric(dmnd_red$habitat)])
+# legend("topleft", title = "phylum", legend = levels(dmnd$phylum), pch = 19, col = rainbow(31), cex = 0.5)
+
+abline(v = 0, h = 0, lty = 2, col = "grey60")
+
+
+suppressMessages(library(car))
+for(i in 1:18){
+  ellipse(center = apply(PCAdmnd$x[which(dmnd_red$phylum == levels(dmnd_red$phylum)[i]),1:2], 2, mean),
+        shape = cov(PCAdmnd$x[which(dmnd_red$phylum == levels(dmnd_red$phylum)[i]),1:2]),
+        radius =  sqrt(qchisq(0.95, df = 2)), col = c(viridis::viridis(8), rainbow(10))[i], lwd = 1.5,
+        center.pch = F)
+}
+
+for (i in 1:18){
+  text(x = mean(PCAdmnd$x[which(dmnd_red$phylum == levels(dmnd_red$phylum)[i]),1]),
+       y = mean(PCAdmnd$x[which(dmnd_red$phylum == levels(dmnd_red$phylum)[i]),2]),
+       labels = levels(dmnd_red$phylum)[i],
+       col = c(viridis::viridis(8), rainbow(10))[i], cex = 1.3)
+}
+
+for (i in 1:length(colnames(Xred))){
+  if ((i %in% which(abs(PCAdmnd$rotation[,1]) > 0.2)) |  (i %in% which(abs(PCAdmnd$rotation[,2]) > 0.2))){
+    shape::Arrows(x0 = 0, y0 = 0, x1 = PCAdmnd$rotation[i,1] * 30, y1 = PCAdmnd$rotation[i,2] * 30, arr.width = 0.1, code = 2, col = "grey40", lwd = 1.5)
+    if (colnames(Xred)[i] %in% c("Virgaviridae")) {
+      text(x = PCAdmnd$rotation[i,1] * 30, y = PCAdmnd$rotation[i,2]*30 - 1.8,
+           labels = colnames(Xred)[i], cex = 1)
+      next}
+    if (colnames(Xred)[i] %in% c("Mitoviridae")) {
+      text(x = PCAdmnd$rotation[i,1] * 30, y = PCAdmnd$rotation[i,2] * 30 + 1.8,
+           labels = colnames(Xred)[i], cex = 1)
+      next}
+    if (PCAdmnd$rotation[i,2] > 0) text(x = PCAdmnd$rotation[i,1] * 30, y = PCAdmnd$rotation[i,2]*30 + 0.6,labels = colnames(Xred)[i], cex = 1)
+    else text(x = PCAdmnd$rotation[i,1]*30, y = PCAdmnd$rotation[i,2]*30 - 0.6,labels = colnames(Xred)[i], cex = 1)
+  }
+}
+
+# legend("bottomleft", title = "Phylum", legend = levels(dmnd_red$phylum), 
+#        col = c(viridis::viridis(8), rainbow(10)), pch = 16, cex = 1)
+```
+```{=latex}
+\caption{PCA biplot of DIAMOND results.\label{fig:dmndbiplot}}
+Phylum labels are located in their respective centroids in the first two PC. Ellipses for bidimensional $95\%$ confidence intervals were computed with function \texttt{ellipse} of package \texttt{car} using the distribution function of $\chi^2_2$ at $0.95$ as radius and the covariance matrix in PC1 and PC2 as shape. In contrast to the pilot test, where the first two PC could explain at least $30\%$ of the variance in all cases, PC1 and PC2 are here only able to explain roughly $19\%$ of the variation. Even if only the 54 families with less than $20\%$ zero values were included, these orthogonal coordinates could not summarize a larger proportion of the variance probably because of the higher phylogenetic diversity in the definitive analysis.
+
+\end{figure}
+
+```
+
+
+A heatmap was drawn to offer a visualization of both the hierarchical clustering of phyla and viral families and the concentration of the transcripts for each viral family in the aggregate virome of each phylum. In this case, within-group variations are completely overlooked. Overall, the average virome compositions estimated for each phylum are fairly similar. Furthermore, the few clusters with nodes that come after long branches in the dendrogram for the phyla do not necessarily involve clear phylogenetic or ecological similarities: for instance, while close evolutionary relationships seem to exist between Rotifera and Chaetognatha [@Frobius2017], Nematoda has a closer phylogenetic relationships to many other phyla before than Porifera. 
+
+As for the viral families, their hierarchical reordering clearly yields at least two distant clusters. The bigger cluster on the right is formed by the most abundant families, while the cluster on the left harbors more scarce families that tend to appear more frequently as the main contributors of PC1 and PC2 in PCA. Arguably, four also seems as a reasonable number of clusters. However, these clusters are again mainly characterized by their abundance. The cluster with higher average concentration is dominated by DNA viruses and viruses of uncertain family.  In the rest of the clusters, the majority of viruses are also DNA viruses.
+
+
+
+```{=latex}
+\begin{figure}[!htbp]
+```
+```{r heatmapaggr, echo = F, results = F, fig.height= 6, fig.width=7}
+# Xred <- t(apply(Xred, 1, function(x) x/sum(x)))
+# 
+# aggr <- data.frame()
+# a <- by(Xred, dmnd_red$phylum, function(x) apply(x, 2, sum))
+# 
+# for (i in 1:length(names(a))){
+#   if (i == 1) aggr <- a[[i]]
+#   else aggr <- rbind(aggr, a[[i]])
+# }
+# colnames(aggr) <- colnames(Xred)
+# rownames(aggr) <- levels(dmnd_red$phylum)
+# aggr <- as.data.frame(t(apply(aggr, 1, function(x) x/sum(x))))
+# apply(aggr, 1, sum) == 1
+# aggr <- aggr[, which(apply(Xred, 2, max) > 0.001)]
+# aggrimp <- zCompositions::multRepl(aggr, label = 0, dl = rep(0.001, dim(aggr)[2]), z.warning = 0.8)
+# 
+# Yaggr <- compositions::clr(aggrimp)
+# 
+# rownames(Yaggr) <- rownames(aggr)
+# # par(mar = c(6,3,3,0))
+# heatmap(Yaggr, cexCol = 0.8, margin = c(6.8,0))
+
+library(png)
+worldmap <-readPNG("_book/_main_files/heatmap.png")
+#get size
+h<-dim(worldmap)[1]
+w<-dim(worldmap)[2]
+
+par(mar=c(0,0,0,0), xpd=NA, mgp=c(0,0,0), oma=c(0,0,0,0), ann=F)
+plot.new()
+plot.window(0:1, 0:1)
+
+#fill plot with image
+usr<-par("usr")    
+rasterImage(worldmap, usr[1], usr[3], usr[2], usr[4])
+
+```
+```{=latex}
+\caption{Heatmap of DIAMOND results.\label{fig:heatmap}}
+Compositional vectors of relative abundances were obtained for each phylum after aggregating observations per phylum in the $181\times54$ reduced matrix. Dendrograms were obtained with the complete linkage hierarchical clustering method over the Aitchison distances for rows and columns. Disconitinuous lines indicate two different viral families clustering criteria. High concentration of transcripts is represented with dark colors in the gradient.
+\end{figure}
+
+```
+
+#### Subset of high quality assemblies
+
+Since it has been shown that E90N50 in our case influences the relative abundance of viral transcripts within the whole transcriptome (Figure \@ref(fig:virqual)) but not the viral families richness, it can be hypothesized that the analysis of high quality assemblies would be able to capture more variation within and between the compositions. The idea behind this supposition is that high quality assemblies involve a higher number of reads mapped to the viral contigs, thus producing more accurate differences to the proportion of expression assigned to each taxon. It was checked that the number of Trinity input reads was not shaping the E90N50 values of the assemblies, so the total number of viral reads is higher in high quality assemblies. Furthermore, longer contigs support a more reliable taxonomic classification based on sequence similarity.
+
+In this case, it was decided to use 1000 bp as the E90N50 threshold to select a subset of high quality assemblies. Among the remaining 129 observations, the observed $\alpha$-diversity distribution is not noticeably distinguishable from the distribution observed for the general dataset: the range remains between 25 and 65, the median is identical (46) and the $IQR$ is just one unit smaller ($49 - 43$ vs. $49 - 42$). Also, Shannon diversity indices appear to be unaffected by the filtering of accessions with $E90N50 < 1000$ bp and still hold at values around $2.5$. Some previously abundant phyla such as Mollusca and Onychophora are reduced to very few observations. Following the procedure conducted for the general analysis, the exclusion of phyla with four or less observations yielded a dataset of 89 observations distributed along 11 phyla (Figure \@ref(fig:qualdiver)). Compared to the general analysis, the subset of viral families with $20\%$ or less zero cells slightly drops from 54 to 52 here. This results in a final $89 \times 52$ compositional matrix.
+
+As in previous analyses, the one-way PERMANOVA model with phylum as factor yields the lowest AIC among all possible combinations of models with phylum and habitat factors. Both the PERMANOVA and PERMDISP tests with phylum grouping for this dataset suggest the rejection of their respective null hypotheses at $\alpha = 0.05$. Thus, it can be concluded that dispersions are heterogeneous between phyla, but at this point it is unclear if the rejection of $H_0$ of PERMANOVA is due to significant differences between the location of centroids and/or just within-group variation differences. The resulting $R^2$ statistic of PERMANOVA model indicates that $28.6\%$ of the variance is explained by phylum.
+
+PERMANOVA and PERMDISP contrasts were performed for all pairwise combinations of phyla to further investigate if any locations of the centroids differ and therefore, if any of the estimated virome compositions diverges from the rest. Ignoring the directionality of the contrasts, i.e. the order in which two groups are expressed, and same phylum comparisons, the number of tests rises to $\frac{n^2-n}{2}$, with $n$ being the number of phyla. With 11 phyla, 55 comparisons are made for each test. In order to avoid an increase of type I errors, $p$-values were adjusted by the $FDR$ correction method. Following this methodology, a matrix was constructed to illustrate the significance of the resulting adjusted $p$-values for each combination of phyla (Figure \@ref(fig:permmatrix)). Again, the virome compositions of xenacoelomorphs and ctenophores appear to be significantly more variable than those of chaetognaths.
+
+A network, or more precisely a graph, was represented to globally illustrate the reported virome similarities and differences for all pairs of phyla (Figure \@ref(fig:grafosqual)). In the binarization of the matrix in Figure \@ref(fig:permmatrix) used to construct the graph, the following conservative decision was made: viromes of pairs of phyla that resulted in rejection of both PERMANOVA and PERMDISP null hypotheses were considered as not significantly different in location. So, the more connections a phylum has, the more indistinguishable are its viromes from those of other phyla. Brachiopoda and Cnidaria are connected to all phyla, therefore being located in the center of the graph. This shows that their viromes were not found to be any different in composition to those of the rest of phyla. Rotifers are the most eccentric group, showing significant virome composition differences. This was already seen in the general analysis, where it was commented that a possible cause is that the sampled species for this phylum are exclusively freshwater.
+
+
+Nemerteans, bryozoans and brachiopods, which belong to the superphylum of Spiralia, seem to have a similar profile of connections and thus, are placed nearly in the graph. Rotifers, which also belong to this clade, appear to diverge from the previously mentioned phyla in the graph, probably because those phyla harbor exclusively marine samples. Nematodes and tardigrades, which are both mainly terrestrial and within the Ecdysozoa superphylum, a sister clade to Spiralia, also are closely related in the graph sharing their disconnection to nemerteans. Chaetognatha, Urochordata and Xenacoelomorpha are spread within Bilateria, which also contains the Spiralia and Ecdysozoa superphyla. These three phyla also share the marine habitat, but do not distribute particularly closely and even viromes of urochordates and chaetognaths appear to be significantly different. Lastly, although ctenophores and cnidarians diverged from the rest of animals very distantly, their viromes do not appear to lie especially apart from the rest. This could be explained by their viromes not being as specialized, thus showing similarities to those of the rest of phyla. The phylogeny of invertebrates presented in Dunn et al. (2014) [@Dunn2014] was taken as a reference. Only clades that result from nodes with broad consensus in the community were mentioned, since the animal tree of life is not completely resolved and is still subject to revision.
+
+It must be taken into account that the number of edges that connect each phylum vertex to others seems to be affected by sample size. Phyla with few observations are placed in the center of the graph, while phyla with more than 10 observations (Figure \@ref(fig:qualdiver)) are all located in the periphery. Again, it can be seen that there is uncertainty in the estimation of 'average' virome compositions in phyla with low sampling depth. It remains unclear if there is an excess in the rate of false negatives in small phyla or an excess of false positives in larger phyla. In summary, the position and links of a phylum in the graph appear to be shaped by their sampling depth and to a lesser extent by their habitats and their evolutionary relationships to other phyla.
+
+
+```{r echo = F, results = F}
+wqual <- merge(quals, dmnd, by = "run") # poner calidad por accession
+
+dmnd_redq  <- wqual[which(wqual$ExN50 > 1000),]
+Xredq <- dmnd_redq[,24:dim(dmnd_redq)[2]]
+summary(apply(Xredq, 1, diff_fams))
+summary(apply(dmnd[,21:dim(dmnd)[2]], 1, diff_fams))
+IQR(apply(dmnd[,21:dim(dmnd)[2]], 1, diff_fams)) - IQR(apply(Xredq, 1, diff_fams))
+
+
+dmnd_redq <- dmnd_redq[which(dmnd_redq$phylum %in% names(which(table(dmnd_redq$phylum) > 4))),]
+dmnd_redq$phylum <- factor(as.character(dmnd_redq$phylum))
+dmnd_redq$habitat <- factor(as.character(dmnd_redq$habitat))
+table(dmnd_redq$phylum) # 11 phyl
+
+Xredq <- dmnd_redq[,24:dim(dmnd_redq)[2]]
+
+
+Xredq <- Xredq[, which(apply(Xredq, 2, function(x) length(which(x > 0))/dim(Xredq)[1]) > 0.2)]
+# Xredq <- Xredq[, which(apply(Xredq, 2, max) < 1000)]
+
+
+Ximpredq <- zCompositions::multRepl(Xredq, label = 0, dl = rep(0.001, dim(Xredq)[2]), z.warning = 0.8)
+Yredq <- compositions::clr(Ximpredq)
+
+mod1 <- vegan::adonis(Yredq ~ dmnd_redq$phylum, method = "euclidean", permutations = 2000)
+
+mod1$aov.tab
+
+
+anova(vegan::betadisper(dist(Yredq, method = "euclidean"), group = dmnd_redq$phylum))
+TukeyHSD(vegan::betadisper(dist(Yredq, method = "euclidean"), group = dmnd_redq$phylum))
+# boxplot(vegan::betadisper(dist(Yredq, method = "euclidean"), group = dmnd_redq$phylum))
+
+# 
+# plot(vegan::betadisper(dist(Yredq, method = "euclidean"), group = dmnd_redq$phylum), 
+#      hull = F, ellipse = T, label = F, col = c(viridis::viridis(5), rainbow(6)))
+# legend("bottomleft")
+```
+
+```{=latex}
+\begin{figure}[!htbp]
+```
+```{r echo = F, results = F, fig.height= 7, fig.width=7}
+nphyl <- length(levels(dmnd_redq$phylum))
+
+# matriz <- matrix(nrow = nphyl, ncol = nphyl)
+# 
+# colnames(matriz) <- levels(dmnd_redq$phylum)
+# rownames(matriz) <- colnames(matriz)
+# 
+# #para cada phylum
+# for (i in 1:nphyl){
+#   for (j in 1:nphyl){
+#     set.seed(872483)
+#     if (i == j){
+#       matriz[i,j] = "D"
+#       next
+#     }
+#     else {
+#       print(rownames(matriz)[c(i,j)])
+#       subsetY <- Yredq[which(dmnd_redq$phylum %in% rownames(matriz)[c(i,j)] )]
+#       fdr <- as.numeric(p.adjust(
+#         adonis(subsetY ~ dplyr::filter(dmnd_redq, phylum %in% rownames(matriz)[c(i,j)])$phylum, method = "euclidean"
+#                , permutations = 2000)$aov.tab$`Pr(>F)`[1], "fdr", n = (nphyl^2 - nphyl)/2))
+#       print(fdr)
+#       fdrp <- as.numeric(p.adjust(
+#         anova(betadisper(vegdist(subsetY, "euclidean"), group = dplyr::filter(dmnd_redq, phylum %in% rownames(matriz)[c(i,j)])$phylum, bias.adjust = F))$`Pr(>F)`[1], "fdr", n = (nphyl^2 - nphyl)/2))
+#       print(fdrp)
+#       if (fdr < 0.05 & fdrp > 0.05) matriz[i,j] = "A"
+#       if (fdr < 0.05 & fdrp < 0.05) matriz[i,j] = "B"
+#       if (fdr > 0.05 & fdrp < 0.05) matriz[i,j] = "C"
+#       if (fdr > 0.05 & fdrp > 0.05) matriz[i,j] = "D"
+#     }
+#   }
+# }
+# matriz[lower.tri(matriz)] = t(matriz)[lower.tri(matriz)]
+
+# write.table(matriz, file = "data/definitivo/pairwise_perm_tests.tsv", row.names = F, col.names = T)
+matriz <- as.matrix(read.delim("data/definitivo/pairwise_perm_tests.tsv"))
+rownames(matriz) <- colnames(matriz)
+
+suppressMessages(library(igraph))
+# matriz[lower.tri(matriz)] <- 0
+# diag(matriz) <- 0
+matriz[which(matriz == "D")] <- 1
+matriz[which(matriz == "B")] <- 1
+matriz[which(matriz == "A")] <- 0
+
+adjmatriz <- matrix(as.numeric(matriz), nrow = nphyl, ncol = nphyl)
+colnames(adjmatriz) <- colnames(matriz); rownames(adjmatriz) <- rownames(matriz)
+g <- graph.adjacency(adjmatriz, mode = "undirected", diag = F)
+set.seed(1)
+plot(g, main = "")
+```
+```{=latex}
+\caption{Virome equivalence network after pairwise PERMANOVA.\label{fig:grafosqual}}
+
+An adjacency matrix was constructed after converting the $p$-value significance matrix for all combinations of phyla to a binary matrix, where 0 represents only differences in location (significant rejection of PERMANOVA $H_0$) and 1 the rest of possibilities. In the graph, this involves the connection (1) or the separation of vertices (0). Self phylum connections are omitted in this unweighted, undirected graph. The result is a figure that allows the simultaneous visualization of the distinctness or similarity between the viromes of all pairs of phyla. In short, edges represent the equivalence of the 'average' viromes of the vertices they connect.
+
+\end{figure}
+
+```
+
+
+The number of observations has halved with regards to the general analysis and the representation of a biplot with all scores is not as saturated here (Figure \@ref(fig:pcaqual)). An increase up to $23.3\%$ is noted in the total variation explained together by PC1 ($13.7\%$) and PC2 ($9.6\%$). Since this is just the analysis of a subset, it was expected that the viral families that are able to summarize a higher proportion of variation in the first two PCs would be essentially the same as in the general analysis, even if some phyla and observations with low quality assemblies were excluded. All viral families displayed in the biplot, i.e. the most influential in the separation of virome compositions, are found within the 58th percentile of families with the lowest assigned mean concentration and the 69th percentile of maximum concentration by family. In short, the RNA molecules of these families are scarce, but variable between observations. However, this is not an artifact due to the procedure of zero replacement, since the observed tpm values for these families are not below the established tpm detection limit ($0.01$). As for the scores, every phylum has its observations relatively grouped and the heterogeneity of dispersions can also be appreciated between the previously mentioned phyla. With respect to habitats, whose information was omitted in the graph, marine, freshwater and intertidal bryozoans are more or less grouped in the central-low region of the biplot, suggesting that phylum has a larger role in the profiling of these viromes. This is homologous to what can be observed in the case of Tardigrada, where its only marine observation is located within the range of its observed terrestrial individuals.
+
+
+
+
+```{r loadkaiju, echo = F, results = F}
+# par(mfrow = c(3,1))
+# par(mar = c(4,4,3,1))
+# 
+# kaiju <- read.csv("data/definitivo/tablas/absabun_kaiju_def.csv", header = T, sep = ",")
+# df <- read.delim("data/db_def_solo_RNA.tsv", header = T)[,-20]
+# kaiju <- cbind(dplyr::filter(df, run %in% kaiju$accession)[order(dplyr::filter(df, run %in% kaiju$accession)$run),], kaiju[order(kaiju$accession), 5:dim(kaiju)[2]])
+# kaiju$bases <- kaiju$bases/1e9
+# kaiju$habitat <- factor(kaiju$habitat)
+# kaiju$phylum <- factor(kaiju$phylum)
+# kaiju$habitat <- factor(kaiju$habitat)
+# kaiju$phylum <- factor(kaiju$phylum)
+# 
+# levels(kaiju$phylum) <- c("ANN", "ART", "BRA", "BRY", "CHA", "CNI", "CTE", "CYC", "DIC", "ECH", "ENT", "GAS", "GNA", "HEM", "KIN", "LOR", "MOL", "NMD", "NMM", "NME", "ONY", "ORT", "PHO", "PLA", "PLT", "POR", "PRI", "ROT", "TAR", "URO", "XEN")
+# 
+# 
+# apply(read.csv("data/definitivo/tablas/BAD_absabun_kaiju_anam.csv", header = T, sep = ",")[,4:132], 1, sum)
+# 
+# # table(kaiju$phylum)
+```
+
+```{r echo = F, results = F}
+# dim(kaiju[,20:dim(kaiju)[2]]) # 210 observaciones y 132 familias
+# which(apply(kaiju[,20:dim(kaiju)[2]], 1, sum) == 0)
+# boxplot(apply(kaiju[,20:dim(kaiju)[2]], 1, diff_fams) ~ kaiju$phylum)
+# 
+# apply(read.csv("data/definitivo/tablas/BAD_absabun_kaiju_anam.csv", header = T, sep = ",")[,4:132], 1, sum) - apply(read.csv("data/definitivo/tablas/AM_absabun_kaiju.csv", header = T, sep = ",")[,4:132], 1, sum)
+```
+
+
+
+## Discussion
+
+In the first place, the introduced preprocessing steps and the reduction of the reference database used by DIAMOND made it possible to analyze a higher number of accessions in a shorter time. However, the presented definitive analysis still covers a limited part of the available datasets. In most phyla, one accession of each of their species was sampled and processed. The confidence in the estimation of virome variability and proper composition in scarcely sampled phyla hinders the applicability of the presented statistical methods on them. The interest in these phyla might not rely so much on the comparison, but on the presence-absence or abundance profiles of their individual compositions, which is not the aim of this study.
+
+The removal of reads by each of the preprocessing steps is variable among observations, but deduplication generates the largest variability in the proportion of discarded reads (Figure \@ref(fig:preprocess)). Exact duplicates not only happen due to experimental reasons, but also due to biological ones and both of these sources of variability exist in the data. Biologically meaningful duplicates can be found in sufficiently abundant transcripts, since the probability of obtaining two or more exact reads or pairs of reads from these sequences not as an artifact of the sequencing platform is not negligible. In differential gene expression studies with single-end RNA-Seq data, where transcript abundance is taken into account, the application of deduplication methods tends to increase the rate of false negatives, especially for genes of moderate to large abundance [@Klepikova2017]. However, all accessions processed in the definitive analysis possessed paired-end libraries. Another study shows how removal of duplicates in RNA-Seq are detrimental to overall alignment statistics because of the high proportion of reads eliminated, but also improve the detection of biological signal in differential gene expression analyses, while retaining the fold changes in the expression of a single gene [@Dozmorov2015]. In our case, it is of primary interest to investigate if removal of duplicates has an effect on the proportionality between the abundance of transcripts of different genes, OTUs or more precisely, viral families. However, this remains unclear and would imply that some sequences are more prone to duplicate generation than others. Duplicate removal is completely established in the analysis of genomic data, but is still an object of discussion in transcriptomics. In RNA-Seq, deduplication can be performed experimentally by unique molecule labeling, prior to PCR amplification [@Fu2018], with the purpose to distinguish biological from experimental duplicates.
+
+
+The proportion of removed rRNA and COX reads with SortMeRNA shows that in most cases, the commonly acknowledged benchmark of $80\%$ rRNA expression among the whole RNA population has not been achieved. This is probably due to the inclusion of only the sequences of 18S and 28S rRNA but not mitochondrial RNA. The proportion of mitochondrial expression, of which COI, COII and COIII are a part, is very dependent on the sequenced tissue and in mammals is observed in the range of almost 0 to $30\%$ [@Mercer2011; @Osorio2021]. Therefore, the variability of the observed proportion of reads filtered with SortMeRNA probably depends on *(i)* the abundance of mitochondrial RNA found in the sample, which also includes the 16S and 12S rRNA subunits of mitochondrial rRNA, *(ii)* the abundance of microbial RNA, which will probably be associated to a decrease in the rate of read removal, since its rRNA transcripts for the 16S, 5S, and 23S microbial rRNA genes have not been targeted. Then, it can be assumed that the RNA populations in accessions where $80\%$ of reads were mapped to eukaryotic rRNA and COX sequences were not rich in mitochondrial and/or prokaryotic transcripts. 
+
+The nature of the RNA populations sequenced in each sample was resolved with the use of this preprocessing step of ribosome depletion. Since $50\%$ or more of reads were left out in all cases and COX transcripts are not known to be able to account for this much of expression, rRNA transcripts have to be present in all libraries. Then, neither ribosome depletion nor poly-A selection of mRNA were performed prior to sequencing. This was expected, since this set of accessions was provided by a team of researchers who focused on the phylogenetic study of rRNA. Nevertheless, the lack of standardized metadata regarding this question in the SRA database and the large number of accessions made it reasonable to doubt if all accessions were homogeneous in this sense.
+
+It appears that the order of the steps in the preprocessing does not have an effect on the proportion of reads  filtered by each one, since no strong correlation has been found between any pair of proportions of kept reads. Therefore, in terms of speed, it would seem appropriate to place SortMeRNA in the last place, since it shows the longest runtimes.
+
+With regards to the proportion of mapped reads, which has a very important effect on E90N50 (Figure \@ref(fig:assemblystats) B), the variability observed among samples might respond to a broad series of reasons. Once filtered by quality, all fragments of a sufficiently sequenced transcript should, in theory, be able to reconstruct the sequence of a contig. An exception can occur when a transcript is rich in low complexity regions, which can cause ambiguity in the alignment and mapping of reads [@Rado-Trilla2012]. It is unknown if the occurrence of this phenomenon is likely to differ between different groups of invertebrates as it is difficult to identify sources of variation for the transcriptomes of invertebrates as a whole, given the limited availability of molecular knowledge for some phyla. Variable sequencing depth can also induce differences in the proportion of mapped reads and the quality of assemblies, especially in the context of transcripts of rare occurrence. An insufficient sequencing depth involves the partial or null reconstruction of contigs, which leaves reads that biologically stem from the same transcript as unrelated. However, this appears not to be the case here after processing only accessions with more than 3 Gb sequenced, since library size shows no relation to both of these assembly statistics.
+
+The E90N50 qualities of the assembled transcriptomes appear to be independent from the proportion of reads filtered with SortMeRNA and Trimmomatic (Figure \@ref(fig:preprassembly) B, C). However, libraries that undergo a more intensive reduction of reads at Clumpify tend to form assemblies of lower quality that are able to map a lower proportion of reads (Figure \@ref(fig:preprassembly) A). As it affects both E90N50 and the percentage of mapped reads similarly, this removal of reads does not seem to selectively target reads of particular transcripts, which would reduce the proportion of mapped reads but not the E90N50, except if precisely the longer transcripts were targeted. Instead, it seems that reads are lost indiscriminately, which causes shorter contigs to occur. This seems problematic and deserves further investigation, since the negative effect of deduplication on the quality of assemblies has not been previously reported to our knowledge.
+
+Another aspect that remains unclear is the positive relationship between the values of E90N50 and the relative abundance of viral transcripts as classified with DIAMOND. This implies that for transcriptomes whose set of $90\%$ most abundant transcripts are formed by longer contigs, a higher proportion of viral transcripts is found. From another point of view, the longer the contigs are that cover $90\%$ of expression, the more scarcely will the host transcripts be found within the transcriptome. Many hypotheses can be speculated that could simultaneously contribute to explain this scenario. 
+
+For instance, transcriptomes dominated by shorter contigs could have a high presence of prokaryotic rRNA, which can account for an important part of the total expression, thus reducing the relative abundance of viral RNA. Another possible cause could be that transcripts of viruses, or at least the most abundant ones, are longer than those of its host. This seems counter-intuitive given that it is often acknowledged that viruses tend to shorten its genome and proteins [@Belshaw2008; @Rappoport2012], but it is worthy to note that apparently giant DNA viruses dominate these viromes and may involve other evolutionary strategies. Genomic RNA molecules of viruses could be longer than the average host transcript, although such an important effect from these molecules could be unexpected given the overall low abundance of RNA viruses.
+
+An important aspect of the effect of assembly quality on the estimated viromes is that the number of different families identified for a particular sample is constant for the range of observed E90N50 values. Then, although assemblies of higher quality assign a higher proportion of expression to viruses, the underlying viral $\alpha$-diversity at the level of families has already been identified. Similarly, Shannon diversity indices, which additionally take into account the evenness among viral families, also seem constant on the observed range of E90N50. Therefore, it seems that diversity is not affected by assembly quality in the range of 500 to 3000 bp, even if one may think that a higher rate of false negatives should occur in assemblies made up of shorter contigs or with a lower proportion of mapped reads. The effect of E90N50 on the relative abundance of viruses but not on their diversity does not seem to translate into an effect on the estimated compositions of viromes, since phyla with more compositional variation are not necessarily rich in low quality assemblies. Since evenness and compositions were not significantly affected by assembly quality, it can be assumed that the increase in the relative abundance of the global virome along with E90N50 maintains the proportionality between the virome components. In summary, low E90N50 did not produce significant detrimental effects on the analysis of compositions, although longer contigs are always prefered for alignment-based analyses, such as taxonomic classification. 
+
+
+As for the identified viral families throughout the pilot test and the definitive analysis, it seems that invertebrates are in very tight contact with their microbiomes and the viromes they harbor. This is suggested by the high abundance of transcripts taxonomically annotated to families of bacteriophages and viruses of protists. However, it must be noted that a sequence of a yet unknown virus could be classified to a closely related family with a different host range to that of the novel virus. For example, viruses related to giant DNA viruses of protists have been found infecting chaetognaths, although no genomic information of it is yet available [@Shinn2018]. If sequence divergence was not too clear, a transcript of one of these viruses could be classified to a family with a misleading host range. Additionally, the recognised host range of a viral family does not necessarily summarize the complete range of hosts that all known and unknown viruses of that family can infect. In recent years, a number of interkingdom events of horizontal virus transfer have been found [@Liu2016; @Nerva2017]. For example, the first identification of a partitivirus that is able to infect and replicate in invertebrates [@Cross2020] has broadened the host range of this family, formerly acknowledged to infect fungi, plants and protists. 
+
+Furthermore, identified viral sequences do not necessarily involve the true presence of those viruses in the sample, since the identified transcripts could result from EVEs and all types of genome integration of viral sequences into transcriptionally active genome regions. In this case, the identified viral sequence arises from a past contact between the virus and its invertebrate or microbial host, but not at the moment of infection. The importance of EVEs in invertebrate genomes has recently been acknowledged, especially in arthropods [@Flynn2019]. In ants, the abundance of relatively ancient and recent EVEs of very diverse RNA and DNA viruses allows for the reconstruction of ant phylogenies and suggests the presence of functional proteins of viral origin in the ant genome [@TerHorst2019]. Additionally, some of the identified EVEs in this study are closely related to families reportedly unable to infect invertebrates, but that are found in the diet of invertebrates, e.g. totivirus and chrysovirus-related EVEs have been found in the genomes of fungus-growing ants. It is unknown to which extent this can be generalized to some or all invertebrate phyla, but EVEs are likely to play an important role on the estimated viromes.
+
+One of the main results of the definitive analysis is that virome diversity is relatively stable among all studied invertebrate phyla: approximately the same number of different viral families were found for all samples. This is consistent with the findings in the pilot test, since the effect of insufficient library sizes was practically eliminated after filtering out accessions with less than 3 Gb sequenced. Consequently, viromes of marine invertebrates are not particularly more or less rich than viromes of terrestrial invertebrates, as viromes of sponges are not more or less complex than viromes of more recent invertebrate phyla, for example. In Zhang et al. (2021) [@Zhang2021], $\alpha$-diversity of marine invertebrate viromes appeared to be more variable within phyla than between phyla. This contrasts with the more pronounced virome composition differences that are found between vertebrates and invertebrates [@Mahar2020]. The present results suggest that the differentiation between viromes of more phylogenetically distant phyla of invertebrates is milder than between vertebrates and invertebrates, although it would be advisable to include vertebrate transcriptomes in the analysis in order to confirm this.
+
+Abundance and virome composition of RNA viruses was already reported to be notably variable within phyla and not very divergent between phyla in basal and apical positions of the tree of metazoans [@Shi2016]. Similar conclusions were found in a transcriptomics study of the DNA viromes associated with invertebrates of several phyla, where a notable abundance of bacteriophages and viruses of protozoans was found [@Porter2019]. However, some of the most prevalent viral families in this study were *Genomoviridae*, *Circoviridae*, *Parvoviridae*, which are known to carry species that are able to infect invertebrates. These families were identified at least once in the definitive analysis, but their transcripts were nowhere as abundant as those other families, such as *Mimiviridae*. The most abundant families of viruses that are likely to infect invertebrates, after ignoring bacteriophages and viruses of protists, are poxviruses ($4.77\%$ of viral RNA), retroviruses ($4.12\%$), baculoviruses ($3.04\%$), iridoviruses ($1.93\%$), polydnaviruses ($1.64\%$), flaviviruses ($1.48\%$), adintoviruses ($0.98\%$), herpesviruses ($0.87\%$), reoviruses ($0.78\%$), hepeviruses ($0.72\%$), metaviruses ($0.58\%$), nairoviruses ($0.40\%$) and ascoviruses ($0.40\%$). This constitutes a very diverse group of DNA, RNA and retro-transcribing viruses, although the most abundantly found families have DNA-based genomes. The host range of some of these apparently ubiquitously abundant families, such as *Poxviridae*, *Herpesviridae* or *Hepeviridae*, include humans and other vertebrates. However, it remains unknown if the identified viruses for these families pose a real risk of vertebrate infection.
+
+Viromes of invertebrates are commonly acknowledged to be characterized by a large abundance and diversity of RNA viruses, rather than DNA viruses [@Harvey2022; @Porter2019]. However, RNA originating from DNA viruses appeared to dominate the population of viral RNA both in the results of the pilot test and the definitive analysis. DNA viruses tend to have larger genomes than RNA viruses, but it is the level of expression which is being measured in transcriptomics. Furthermore, transcripts and genomes are surveyed in the case of RNA viruses. So, levels of expression in DNA viruses for the analyzed datasets have to be generally higher than those of RNA viruses. It is unknown if any or some of the transcriptomics datasets included a selection step or methodology that selectively affected RNA viruses with respect to DNA viruses, although it seems unlikely given that their initial purpose was not that of virus analysis.
+
+In a metagenomics study on the DNA viromes of four different marine invertebrate phyla (Arthropoda, Cnidaria, Echinodermata, Urochordata), bacteriophages of families *Myoviridae*, *Podoviridae* and *Siphoviridae* were found to be undoubtedly the most abundant and spread viral families in the sampled organisms [@Gudenkauf2016]. Interestingly, protist viruses of *Phycodnaviridae* were also found in a very remarkable overall abundance. However, *Mimiviridae*-related sequences were not reported to dominate the viromes nowhere as much as in the presented results. Although the use of DNA or RNA data as a source to measure viral abundance has important differences, one possible explanation for this fact might lie in the changes that the nr database, which is also used in this study, can have suffered over the last six years.
+
+The exceptional abundance of mimiviruses and siphoviruses in our results could be either due to *(i)* a true ubiquitous presence of these and/or closely related viruses, *(ii)* the integration of EVEs related to these families in transcriptionally active regions or *(iii)* the opposite situation, i.e. the integration of host genes in the genomes of these viruses. In this case, the hijacked gene would have to be annotated in the reference database as belonging to that virus species. Then, even if this chimeric virus was absent from a sample, the presence of a sufficiently similar transcript of the original microbial or invertebrate host gene would be detected as a viral sequence. This is an important shortcoming of the presented taxonomic classification, since the fact that a contig could be more similar to an eukaryotic or prokaryotic sequence than to a viral sequence was ignored. Instead, every contig with a viral hit with an E-value lower than $1e-05$ was considered viral. This was made in order to improve sensitivity, since ignoring all contigs with a more similar eukaryotic hit could eliminate true viral sequences for their similarity to an EVE. Even if this occurred, it must be a host gene that is very abundantly expressed.
+
+Additionally, it has been shown how these highly abundant viral families were not able to profile the differences between the viromes of invertebrates of different phyla. Instead, infrequent viral families generate the compositional variation between the observations. The relative information in the parts of a composition, whose values are very low or near to the detection limit, might be more sensitive to the noise, i.e. false negative and false positive rates. For instance, the relative contribution to the whole for a family with one read mapped is doubled when one further read is classified to it. This is avoided to a certain extent by the selection of a subset of viral families prior to compositional analysis. However, there is no universally accepted criterion for the dimensionality reduction of features in the compositional analysis of microbiomes or viromes. In this study, criteria based on sparsity in the compositional matrix and the maximum observed relative abundance were used. In Xia et al. (2018) [@Xia2018b], parts have to met the requirement of having a minimum relative abundance higher than $0.1\%$ in order to be kept for the analysis. One could think of other methods, using other location measures such as the mean or introducing the variability in each part. In all cases, it involves the establishment of an arbitrary acceptance-rejection threshold. The use of a different dimensionality reduction criterion could have had an important effect on the rare viral families that were able to generate more variability between observations.
+
+It has been shown in both the pilot test and the definitive analysis that phylum is able to explain approximately 21 to 30$\%$ of the virome differences between invertebrate samples (28 to 30$\%$ for compositions generated with taxonomic classification of contigs with DIAMOND). Phylum segregation of samples was significantly associated with differences in the virome compositions in all tested datasets. Habitat factor was also significantly associated with virome differences, although the amount of variance explained by phylum grouping was always superior (one-way habitat models generally explained less than $10\%$ of the variance). Furthermore, it has been shown that the additive or multiplicative inclusion of habitat factor in a PERMANOVA model with phylum factor does not achieve a better goodness of fit than the one-way model with just phylum grouping. Therefore, the habitat factor did not provide important information with respect to virome compositions that was not already covered by the phylum factor. However, collinearity between phylum and habitat factors reached a very high degree in the analyzed datasets, which can lead to this situation. Therefore, these results do not suggest that the habitat of the invertebrates does not have an effect shaping the composition of its virome. Ideally, this would require the sampling of invertebrates of variable habitats within fixed phyla, while trying to achieve a balance between the sample sizes of habitats, if possible.
+
+The evolutionary history of invertebrate viruses is thought to involve a long history of host-virus co-divergence and numerous horizontal virus transfers with other invertebrates and more distant organisms [@Harvey2022]. The former could be approximated with the phylum factor, while the latter could be related with the habitat of the invertebrate, which influences the pool of organisms from which viruses can be transmitted, e.g. plants in terrestrial environments. Then, viromes of closely related phyla would be expected to be similar, as a consequence of co-divergence, as viromes of closely related habitats, since the invertebrate could be in contact with similar organisms which harbor their own viromes. Co-divergence was not identified between the analyzed phyla, as the observed similarities between the viromes of different phyla do not reconstruct their phylogenetic relationships in the tree of animal life (Figure \@ref(fig:grafosqual)). This could have been masked by the presence of other organisms in the samples, especially microbes, but it could be better examined with a more intensive sampling of phyla and balanced sample sizes, if possible. As for the habitats, it has been shown that viromes of marine, terrestrial and freshwater samples (Figures \@ref(fig:sample50pcacat) and \@ref(fig:pcaqual)) tend to be different. Viromes of freshwater samples, which are represented mainly by platyhelminths and rotifers, are especially divergent from the rest. Transition habitats, such as intertidal zone, which mediates between marine and terrestrial habitats, and brackish water, which is located between marine and freshwater habitats, seem to carry similar viromes to those of their respective related main habitats (Figure \@ref(fig:habpcoa)).
+
+Additionally, dispersion of viromes within particular phyla or habitats were increased after deciding to sample only one observation per species. Although some species and their viromes can still be very closely related within a phylum, e.g. same-genus species, observations seem to be more scattered in the PC1-PC2 or PCo1-PCo2 space than in the analyses of the pilot test using taxonomic classification of contigs (Figure \@ref(fig:sample50pcadiamond)). This is necessary in order to not underestimate the variability of the viromes in the different phyla, although the phylogenetic relationships between species were not controlled. For instance, virome exploration in a phylum can be greatly hindered by the analysis of a very narrow range of related species, which is the case for arthropods, from which only arachnids were sampled.
+
+Finally, some remarks about the statistical analysis will be presented. First, an analysis of outliers has not been performed. And even if it does not seem that some individuals in the definitive analysis can constitute outlying observations judging from their distribution in the PCOa or PCA plot, identification of multivariate outliers is not trivial. Multivariate outliers are known to have a great effect on SVD. However, the covariance matrix of *clr*-transformed compositional data is singular, which prevents the use of the classical Mahalanobis distances. To date, the use of other logratio transformations, such as *ilr*, and robust Mahalanobis distances are the preferred multivariate outlier detection method for compositional data [@Filzmoser2012]. Second, although it was avoided to use groups with less than five observations in PERMANOVA and PERMDISP analyses, sample sizes were notably unbalanced. While PERMDISP allows for the adjustment of this kind of bias directly in \texttt{R}, the classical definition of pseudo $F$-ratio in PERMANOVA can lead to an inflation of type I error in the presence of unbalanced groups and heterogeneity of dispersions. Several solutions have been proposed to this problem [@Anderson2017b; @Alekseyenko2016], although neither of them is still implemented in package \texttt{vegan}.
+
+## Conclusion
+
+In conclusion, we have presented the whole procedure of a meta-analysis of public invertebrate transcriptomic datasets in the context of whole virome identification. First, the development and selection of an accurate and time-efficient pipeline for the taxonomic classification of sequences into viral families was conducted. The final pipeline included preprocessing steps for the trimming of adapters and the removal of reads based on the occurrence of sequence duplicates, their affinity to eukaryotic rRNA and their sequencing quality. High rates of deduplication were found to be associated with a decrease in the quality of assemblies (E90N50) and the percentage of reads mapped to contigs. However, assemblies of low quality were apparently able to reconstruct the diversity and composition of viromes similarly to high quality assemblies.
+
+Second, the ecological abundance matrices resulting from the application of this pipeline were set to be analyzed under the framework of compositional data analysis. In recent times, these methodologies are gaining popularity in the study of ecological community structures, in contrast to classical methods used in ecology. The application of compositional data analysis procedures is more robust, since it acknowledges the characteristics of communities such as viromes and the goals that researchers tend to have over these types of data. In our case, the application of PERMANOVA and PCA using Aitchison distances and *clr* transformations, i.e. classical compositional data analysis methods, has been used in order to identify differences in the virome compositions of invertebrates between different phyla and habitats.
+
+To our surprise, we found that viromes were remarkably similar between invertebrate species of very distant phyla. However, phylum classification of invertebrate samples was able to summarize almost $30\%$ of the total variance between viromes for different datasets. In all occasions, phylum classification has been found to be more informative than habitat with respect to invertebrate virome composition. Although the evolution of invertebrate viruses is thought to be explained by an hybrid history of virus-host co-divergence and numerous events of cross-species virus transmission, this has not been clearly identified for the sampled dataset.
+
+In this meta-analysis, the use of metadata in the SRA database has been of great importance. For instance, invertebrate taxonomy, the amount of sequenced bases and the type of sequencing library metadata were all recovered from this database and used in order to better characterize each sample. These fields are complete for all accessions. However, there are lots of other non-standardized and incomplete fields that could provide very valuable information about the ecological environment of the sample, the experimental conditions and its geographical coordinates. Although metadata regarding the sequencing technology used to generate a dataset are generally available, information about the presence or absence of a step for the selection of a particular RNA molecule population is lacking. It was checked that all sampled datasets did not originate from ribosome-depleted or poly-A-selected transcriptomes after mapping reads to rRNA sequences. This is an important shortcoming of this meta-analysis, since the experimental procedures used in some samples might not be suitable for the analysis of viruses.
+
+It must be noted that the results are entirely dependent on the bioinformatics pipeline and especially on the reference database that is used in the taxonomic classification of sequences. Although it has not been presented for the definitive analysis, viruses found with Kaiju in the pilot test are not radically different for those found with DIAMOND. Overall, the dominance of the same or similar families of DNA viruses is noted. Viromes of invertebrates have always been recognised to harbor a higher diversity of RNA viruses. However, the observed abundance of DNA viruses appears to be partly influenced by the presence of microbes associated with the invertebrate samples.
+
+As a final remark, this holistic approach to the diversity and the abundance profile of virome compositions in invertebrates is likely to ignore the presence of unknown viruses, especially in understudied phyla. Reference databases are in constant development and the identification of novel virus species in bottom-up studies is the basis over which (meta)viromics can be constructed. Furthermore, (meta)viromics studies, such as the present one, commonly require the annotation of each virus to a taxonomic lineage, which involves the consensus of virologists and, sometimes, the rearrangement of entire taxa in order to fit the new discoveries. All in all, the outcome of holistic projects in virology largely depends on the efforts of the entire community of virologists.
+
+
+## Note {-}
+
+This is a reproducible report generated with Bookdown version 0.24 [@Xie2016; @Xie2022]. The data, the code and its package requirements are accessible in [https://github.com/palf98/metaviromics](https://github.com/palf98/metaviromics). The code was developed using \texttt{R} version 4.0.4 in RStudio version 1.4.1717.
+

@@ -1,0 +1,135 @@
+```{r echo=F, results = F}
+library(kableExtra)
+
+dat <- read.delim("data/db_def_solo_RNA.tsv", header = T)
+dat$phylum <- factor(dat$phylum)
+dat$order <- factor(dat$order)
+dat$family <- factor(dat$family)
+dat$genus <- factor(dat$genus)
+dat$species <- factor(dat$species)
+dat$habitat <- factor(dat$habitat)
+dat$libstrat <- factor(dat$libstrat)
+dat$libsource <- factor(dat$libsource)
+
+sum(grepl("sp.", unique(dat$species), fixed = T)) #numero de especies que se quedan en sp.; discutir en descripcion de variables
+
+
+#### Tabla de especies unicas por phylum
+
+obj <- read.delim("data/definitivo/seed21338385_todo.tsv", header = T)
+mean(obj$bases)/1e9
+range(obj$bases)/1e9
+obj[which.max(obj$bases),]
+
+```
+
+
+
+# Materials
+
+## Data frame preparation
+
+An original data frame was provided by researchers of the biodiversity and evolution of invertebrates Rosa Fernández and Ana Riesgo, affiliated to the Institut de Biologia Evolutiva (UPF-CSIC, Barcelona) and the Museo de Ciencias Naturales (CSIC, Madrid), respectively. This database comprised 8153 unique SRA, BioSample and BioProject identifiers. To contextualize, these three NCBI databases are hierarchically related: a BioProject is a collection of one or more BioSamples and a BioSample contains one or more run accessions in the SRA database, that connects each identifier with its corresponding raw read sequence files in fastq format (one file in the case of single-end reads and two for paired-end reads). Each one of these databases harbors metadata annotated by the original authors of each entry that gives some sort of technical and biological background to the uploaded data.
+
+This collection of invertebrate RNA-Seq datasets was originally used within the frame of an unpublished project of CSIC’s LifeHUB.CSIC: Conexión-Vida initiative in evolutionary biology with the aim of resolving and improving the resolution in the tree of life, specifically in the branches related to invertebrates. In this project, the phylogeny of invertebrates of more than 30 phyla was approached by targeted analysis of mitochondrial genes 16S rRNA and cytochrome c oxidase subunit I (COI). As it has been previously introduced, RNA-Seq datasets harbor a large amount of information that can accomodate studies with very diverse goals other than that of their original authors, including analysis of viral sequences.
+
+```{r echo = F}
+#\clearpage con esta orden se evita el error 'Warning: LaTeX Warning: `!h' float specifier changed to `!ht'.', pero queda un hueco en en la pagina anterior a la tabla.
+```
+
+```{r phyltab, echo = F}
+
+nsp <- function(datafr, x) length(unique(datafr[,x])) # data frame and species index
+nuniq <- function(x) length(unique(x))
+
+
+levels(dat$phylum) <- c("Annelida (ANN)", "Arthropoda (ART)", "Brachiopoda (BRA)", "Bryozoa (BRY)", "Chaetognatha (CHA)", "Cnidaria (CNI)", "Ctenophora (CTE)", "Cycliophora (CYC)", "Dicyemida (DIC)", "Echinodermata (ECH)", "Entoprocta (ENT)", "Gastotricha (GAS)", "Gnathostomulida (GNA)", "Hemichordata (HEM)", "Kinorhyncha (KIN)", "Loricifera (LOR)", "Micrognathozoa (MIC)", "Mollusca (MOL)", "Nematoda (NMD)", "Nematomorpha (NMM)", "Nemertea (NME)", "Onychophora (ONY)", "Orthonectida (ORT)", "Phoronida (PHO)", "Placozoa (PLA)", "Platyhelminthes (PLT)", "Porifera (POR)", "Priapulida (PRI)", "Rotifera (ROT)", "Tardigrada (TAR)", "Urochordata (URO)", "Xenacoelomorpha (XEN)")
+
+spxphyl <- as.vector(by(dat$species, INDICES = dat$phylum, FUN = nuniq))
+runxphyl <- as.vector(by(dat$run, INDICES = dat$phylum, FUN = nuniq))
+total <- c("Total", length(unique(dat$species)), length(unique(dat$run)))
+df <- data.frame(Phylum = levels(dat$phylum), Unique_species = spxphyl, Run_accessions = runxphyl)
+df <- rbind(df, total)  
+
+dfbis <- cbind(rbind(df[1:16,],c("-","-","-")), df[17:33,])
+
+
+
+knitr::kable(dfbis, col.names = gsub("[_]", " ", colnames(dfbis)), align = "lcclcc", linesep = "", format = "latex", row.names = F,
+       caption = "RNA-Seq data sampling depth across the 32 invertebrate phyla included in the final data frame.", booktabs = T) %>%
+  kable_styling(position = "center", latex_options = c("striped","hold_position", "scale_down")) %>%
+  row_spec(16, hline_after = T)
+
+
+```
+
+
+Additional information in the data frame associated with each accession was the habitat and taxonomic information about the invertebrate host species sampled, i.e. phylum, order, family and the scientific name of the species, amassing 1925 unique species. However, order and family annotation was only complete in Arthropoda, Mollusca and Porifera phyla. Habitat values were missing in 16 phyla, including Nematoda and Platyhelminthes, to name the most represented ones. Habitat annotation was completed by consulting online resources such as the World Register of Marine Species (WoRMS) [@worms] and BioSample metadata when available. This collection of accessions was the result of a collaboration between different researchers specialized in different phyla. Therefore, data frame structure, variable names and values had to be completely standardized before proceeding.
+
+Once done, the objective was to construct a new data frame with as many rows as SRA identifiers (or run accessions) expanding BioSample and BioProject rows into several new ones. An *ad hoc* python script was developed to parse the original data frame by its identifiers to systematically expand them into run accessions and extract metadata from the corresponding NCBI databases using \texttt{esearch}, \texttt{efetch} and \texttt{esummary} functions of [Entrez Direct](https://www.ncbi.nlm.nih.gov/books/NBK179288/)(a command line implementation of Entrez Programming Utilities), combining the retrieved information with that of the original data frame. Metadata was used to confirm and complete the taxonomic assignment of each run accession and to reassure that the sequencing library was indeed generated by RNA-Seq. Apart from that, other columns were constructed based on metadata fields such as file size, isolation source and geographical location. After ignoring accessions corresponding to experiments with DNA and EST libraries that were contained in some BioSamples, the result was a final data frame with `r length(unique(dat$run))` unique run accessions (Table \@ref(tab:phyltab)).
+
+Extracted species names coincided mostly with those in the original data frame and the majority of mismatches were due to orthographic inconsistencies, synonymous names and subspecies or laboratory strain overspecification, which were modified to match a name of the species' taxonomic rank. A minority of accessions presenting other types of species mismatching and resulting even in phylum confusions were corrected according to the information present in their corresponding BioSample and SRA entries. Definitive species designation was finally achieved after normalizing names in samples of uncertain species, writing the lowest certain taxonomic rank followed by the "sp." abbreviation, which occurs in `r sum(grepl("sp.", unique(dat$species), fixed = T)) #numero de especies que se quedan en sp.; discutir en descripcion de variables` species. The whole process of standardization led to an artificial decline in species diversity to `r length(unique(dat$species))` species. The final data frame is available in this project's [GitHub repository](https://github.com/palf98/metaviromics).
+
+## Population, statistical unit and variables
+
+From a statistical point of view, this project is conceived as an observational study, directed towards descriptive (alternatively associational) inference rather than causal questions. Therefore, the aim is to extrapolate correlations found in the sample between response and covariates to a population scale. The population is defined as the whole possible invertebrate environmental or laboratory samples. It is worthy to note that each individual of this population is referred to as a sample in a biological sense, as it can consist of a body part, an individual or a set of individuals given the size of the organism and the original aim of the authors of each experiment. The subset of these biological samples with publicly accessible transcriptomes comprise the units of observation, i.e. the level at which the variables are measured. Furthermore, only a fraction of all possible units of observation will be included in the analysis. As the results will be informative not only for the included samples, the unit of analysis ignores the limitation of data availability and is constituted by the individuals of the previously defined population. Thus, the units of observation are contained within the units of analysis.
+
+The availability of data is a source of bias, as the observations are not random draws of the population, but biological samples of interest for a particular group of researchers. Therefore, it is to be expected that the distribution of taxons and habitats in the units of observation differs from that of the units of analysis. For instance, the number of observations of Platyhelminthes samples exceeds by several orders of magnitude that of classically undersampled phyla (Table \@ref(tab:phyltab)), but this does not speak about their abundance within the possible invertebrate samples, but the attention they have received by researchers.
+
+For each biological sample, different variables are measured with the aim of studying their effect on virome composition and controlling errors and biases. In the first place, several hierarchically related categorical variables serve as the source of taxonomic information for each observation. For practical reasons and incompleteness of other taxonomic ranks, only the species and phylum factors are included in the analysis. Intermediate ranks can provide an explanation for unexpected results if it has been considered that each species is equally related to the rest of species within a phylum, e.g. disparate clusters within a phylum. Given the relevance of virus-host co-evolution in invertebrates, we hypothesize that the phylum factor might have an effect on virome composition.
+
+A second categorical variable is comprised by the habitat factor, which divides the biological samples in six categories: terrestrial, marine, freshwater, intertidal zone (littoral zone within the tidal range), brackish water (water of intermediate salinity between freshwater and seawater commonly occuring in estuaries) and saline lakes. The taxonomy of an organism is not independent from its habitat, e.g. if it is known that an organism belongs to Cnidaria phylum, most certainly it will be a marine species. However, species of other phyla such as Annelida, Arthropoda or Platyhelminthes can live in a variety of habitats. The hypothesis behind the consideration of the habitat factor is that the contamination by other organisms, each carrying its own viruses, differs depending on the habitat, therefore shaping the sample’s virome composition. Habitat factor also can account for horizontal virus transfer as it can explain for example the presence of terrestrial plant viruses in terrestrial invertebrates with lifestyles associated with plants. 
+
+However, there is a downside to the explaining power of this variable, namely the uncertainty about the sampling conditions of each biological sample. This factor assumes that the natural habitat for each species is equally relevant for all samples, but different researchers could have applied diverse measures to control environmental contamination or even grown the samples in the laboratory. A categorical variable of binary outcome was defined to assign a labstock origin to the samples that were tagged as such under the “isolation source” BioSample metadata field, with the hypothesis that the diversity of viral families in these samples is lower than in the rest. This affects `r sum(dat$laboratory)` accessions of `r length(unique(dat$species[which(dat$laboratory == T)]))` species. Furthermore, the diversity in lifestyles within the different habitat categories is unequal, e.g. terrestrial habitat includes soil free-living invertebrates, endo- and ectoparasites of animals and plants, while intertidal zone refers to a more specific range of lifestyles. Therefore, the diversity of contamination sources is expected to be larger in less accurately defined habitats.
+
+Geospatial information was also retrieved from BioSample metadata fields “geographical location” and “latitude and longitude” coordinates. Nevertheless, this information is widely incomplete and hinders the possibility of a spatial analysis at a large scale, as coordinates could only be recovered for less than 500 species representing a lower amount of phyla.  Still, this information is valuable to demonstrate the geographical diversity of the samples (Figure \@ref(fig:worldmap)).
+
+```{=latex}
+\begin{figure}[!htbp]
+```
+```{r worldmap, fig.align='center', echo = F}
+library(png)
+worldmap <-readPNG("_book/_main_files/worldmap.png")
+#get size
+h<-dim(worldmap)[1]
+w<-dim(worldmap)[2]
+
+par(mar=c(0,0,0,0), xpd=NA, mgp=c(0,0,0), oma=c(0,0,0,0), ann=F)
+plot.new()
+plot.window(0:1, 0:1)
+
+#fill plot with image
+usr<-par("usr")    
+rasterImage(worldmap, usr[1], usr[3], usr[2], usr[4])
+
+```
+```{=latex}
+\caption{Geographical diversity of the biological samples. \label{fig:worldmap}}
+Distribution of the 1072 run accessions with available latitude and longitude data. A majority of the points are found near populated areas of North America, Oceania and Europe, while other regions, e.g. Central Asia and Africa, remain underrepresented. Although the spread of locations is unequal, the study can be considered global by the geographical diversity of the observations.
+\end{figure}
+```
+
+Another variable that was controlled was the number of bases sequenced in each run accession, which constitutes a quantitative discrete variable. This measure is related to the number of reads, read length and, ultimately, sequencing depth. So, sequencing depth is estimated without having to download sequence files and parsing them character by character afterwards. The values in the available accessions range between 0 and 150 Gbases with an average of approximately $7.7$ Gbases after sampling one random accession per species. We hypothesize that accessions with lower number of bases will yield a lower virome diversity as lower sequencing depth is associated with a loss of sensitivity.
+
+One can think of many uncontrolled variables that can affect virome composition in this meta-analysis. First, the time of the year and the temperature can affect the community composition of a biological sample, indirectly affecting its virome composition. Furthermore, not only communities are dynamic, but also their transcriptomes are responsive even to different times of the day. As it has been mentioned, the experimental conditions and procedures also can have an effect on virome composition, e.g. a selection of polyadenylated^[Alternatively poly-A or poly(A). Typically, a 3$^\prime$ poly-A tail is added in the process of mRNA maturation.] RNA molecules in some samples but not in others would result in a differential representation of RNA viruses, since non-polyadenylated RNA virus genomes will be excluded from the pool of sequenced polyadenylated molecules. Other kinds of experimental procedures such as the sequencing platform and the presence of a viral particle enrichment step previous to sequencing could bias virus identification. In an ideal scenario, these variables could be controlled with proper standardized metadata annotation, which would allow for more ambitious meta-analyses, including spatial and longitudinal studies.
+
+Finally, the virome composition constitutes the multivariate response. After the application of the bioinformatics pipeline, the raw sequences are translated into vectors formed by viral family abundance values for each observation with as many components as viral families identified overall. Depending on the metrics used for abundance estimation, the variables that compose the vector can be discrete (e.g. number of reads) or continuous (e.g. transcript abundance per million transcripts). However, relative abundances are always continuous. The characteristics of compositional data will be discussed in the next section.
+
+
+
+```{r habxphyl, echo=F}
+# tabla <- as.data.frame.matrix(table(dat$phylum, dat$habitat))
+# phyltot <- apply(table(dat$phylum, dat$habitat), 1, sum)
+# rownames(tabla)[19] = "Ntd"
+# rownames(tabla)[20] = "Ntm"
+# rownames(tabla)[21] = "Nme"
+# rownames(tabla)[25] = "Plc"
+# rownames(tabla)[26] = "Plt"
+# rownames(tabla) = substr(rownames(tabla), 1, 3)
+# 
+# barplot(t(tabla / phyltot), col = 2:8, cex.names = 0.5)
+
+
+
+```
+

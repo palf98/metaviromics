@@ -1,0 +1,42 @@
+--- 
+title: "Large-scale compositional analysis of invertebrate viromes estimated from public RNA-Seq data"
+author: "Pau Alfonso i Comos"
+date: "July, 2022"
+lof: yes
+lot: yes
+output:
+  html_document:
+    df_print: paged
+  bookdown::pdf_book:
+    citation_package: biblatex
+    extra_dependencies: ["amsmath"]
+documentclass: book
+classoption: openany
+csl: apa-numeric-superscript.csl
+header-includes:
+  - \AtBeginDocument{\renewcommand{\chaptername}{Part}}
+  - \usepackage{booktabs} 
+  - \usepackage{longtable} 
+  - \usepackage{array}          
+  - \usepackage{multirow}   
+  - \usepackage{wrapfig}    
+  - \usepackage{float}
+  - \usepackage{colortbl}    
+  - \usepackage{pdflscape}
+  - \usepackage{tabu}
+  - \usepackage{threeparttable} 
+  - \usepackage{threeparttablex}
+  - \usepackage[normalem]{ulem}
+  - \usepackage{makecell}
+  - \usepackage{hyperref}
+  - \usepackage{float}
+bibliography:
+- book.bib
+- packages.bib
+description: |
+  This is a maximal example of using the bookdown package to write a book.
+link-citations: yes
+github-repo: rstudio/bookdown-demo
+site: bookdown::bookdown_site
+---
+
