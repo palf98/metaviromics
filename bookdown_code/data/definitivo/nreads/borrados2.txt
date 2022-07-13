@@ -1,0 +1,1 @@
+acc,clumpify input reads,clumpify output reads,Trimmomatic input reads,Trimmomatic output reads
