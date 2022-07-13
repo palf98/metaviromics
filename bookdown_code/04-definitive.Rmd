@@ -841,5 +841,5 @@ As a final remark, this holistic approach to the diversity and the abundance pro
 
 ## Note {-}
 
-This is a reproducible report generated with Bookdown version 0.24 [@Xie2016; @Xie2022]. The data, the code and its package requirements are accessible in [https://github.com/palf98/metaviromics](https://github.com/palf98/metaviromics). The code was developed using \texttt{R} version 4.0.4 in RStudio version 1.4.1717.
+This is a reproducible report generated in an \texttt{R} project with Bookdown version 0.24 [@Xie2016; @Xie2022]. The data, the code and its package requirements are accessible in [https://github.com/palf98/metaviromics](https://github.com/palf98/metaviromics). The code was developed using \texttt{R} version 4.0.4 in RStudio version 1.4.1717.
 
