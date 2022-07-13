@@ -1,6 +1,5 @@
 # Supplementary
 
-
 ```{r fqd-speed, echo = F}
 library(kableExtra)
 

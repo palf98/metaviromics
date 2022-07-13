@@ -1,5 +1,7 @@
 # Definitive analysis
 
+In this section, the conclusions of the pilot test are taken into account to design a final, definitive pipeline in order to perform an extension of the analysis to a larger and more general scale. However, from the point of view of the data, this analysis is not definitive but provisional, since the amount of samples that have been processed is just a fraction of the available samples.
+
 ```{r echo = F, results = F}
 
 

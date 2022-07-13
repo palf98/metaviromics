@@ -23,15 +23,13 @@ obj[which.max(obj$bases),]
 
 ```
 
-
-
 # Materials
 
 ## Data frame preparation
 
 An original data frame was provided by researchers of the biodiversity and evolution of invertebrates Rosa Fernández and Ana Riesgo, affiliated to the Institut de Biologia Evolutiva (UPF-CSIC, Barcelona) and the Museo de Ciencias Naturales (CSIC, Madrid), respectively. This database comprised 8153 unique SRA, BioSample and BioProject identifiers. To contextualize, these three NCBI databases are hierarchically related: a BioProject is a collection of one or more BioSamples and a BioSample contains one or more run accessions in the SRA database, that connects each identifier with its corresponding raw read sequence files in fastq format (one file in the case of single-end reads and two for paired-end reads). Each one of these databases harbors metadata annotated by the original authors of each entry that gives some sort of technical and biological background to the uploaded data.
 
-This collection of invertebrate RNA-Seq datasets was originally used within the frame of an unpublished project of CSIC’s LifeHUB.CSIC: Conexión-Vida initiative in evolutionary biology with the aim of resolving and improving the resolution in the tree of life, specifically in the branches related to invertebrates. In this project, the phylogeny of invertebrates of more than 30 phyla was approached by targeted analysis of mitochondrial genes 16S rRNA and cytochrome c oxidase subunit I (COI). As it has been previously introduced, RNA-Seq datasets harbor a large amount of information that can accomodate studies with very diverse goals other than that of their original authors, including analysis of viral sequences.
+This collection of invertebrate RNA-Seq datasets was originally used within the frame of an unpublished project of LifeHUB.CSIC: Conexión-Vida initiative in evolutionary biology with the aim of resolving and improving the resolution in the tree of life, specifically in the branches related to invertebrates. In this project, the phylogeny of invertebrates of more than 30 phyla was approached by targeted analysis of mitochondrial genes 16S rRNA and cytochrome c oxidase subunit I (COI). As it has been previously introduced, RNA-Seq datasets harbor a large amount of information that can accomodate studies with very diverse goals other than that of their original authors, including analysis of viral sequences.
 
 ```{r echo = F}
 #\clearpage con esta orden se evita el error 'Warning: LaTeX Warning: `!h' float specifier changed to `!ht'.', pero queda un hueco en en la pagina anterior a la tabla.
